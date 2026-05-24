@@ -2,7 +2,7 @@
 
 ## 1. Betriebsmodell
 
-Der Sitzplaner wird im MVP als statische Web-App betrieben. Es gibt keinen Serverzustand, keine Datenbank und keine Accounts. Alle produktiven Nutzdaten liegen im Browser der Nutzer:innen und können als JSON exportiert werden.
+Der Sitzplaner wird im MVP als lokale Web-App und native macOS-App betrieben. Es gibt keinen Serverzustand, keine Datenbank und keine Accounts. Produktive Nutzdaten liegen lokal im Browser der Nutzer:innen oder in der lokalen macOS-App und können perspektivisch als JSON exportiert werden.
 
 Das ist technisch schlicht, datenschutzfreundlich und deutlich weniger anfällig als ein halbgarer Login-Zoo mit Datenbankpanik im Hintergrund.
 
@@ -10,14 +10,16 @@ Das ist technisch schlicht, datenschutzfreundlich und deutlich weniger anfällig
 
 | Variante | Beschreibung | Empfehlung |
 |---|---|---|
-| lokal via Dev Server | `npm run dev` | Entwicklung |
-| statischer Build | `npm run build` + `dist/` ausliefern | MVP-Produktion |
+| Web lokal via Dev Server | `npm run dev` | Entwicklung Web |
+| Web statischer Build | `npm run build` + `dist/` ausliefern | MVP-Produktion Web |
 | GitHub Pages | statisches Hosting aus `dist/` | einfach |
 | Cloudflare Pages/Netlify | automatischer Build aus Git | komfortabel |
-| eigener Webserver | Nginx/Apache liefert `dist/` | self-hosted |
+| eigener Webserver | Nginx/Apache liefert `dist/` | self-hosted Web |
+| macOS lokal | `swift run SitzplanMac` | Entwicklung macOS |
+| macOS App-Bundle | `./scripts/build-app.sh` → `dist/Sitzplaner.app` | interne Desktop-Builds |
 | Backend-Betrieb | API + DB | erst spätere Phase |
 
-## 3. Build
+## 3. Build Web
 
 ```bash
 npm ci
@@ -39,7 +41,31 @@ Nur `dist/` wird ausgeliefert. Nicht ausliefern:
 - lokale Projektdateien
 - Testdaten mit echten Schülerdaten
 
-## 4. Deployment statisch
+## 4. Build macOS
+
+```bash
+cd macos/SitzplanMac
+swift build
+swift run SitzplanMac
+./scripts/build-app.sh
+```
+
+Build-Ergebnis:
+
+```text
+macos/SitzplanMac/dist/Sitzplaner.app
+```
+
+Das App-Bundle wird aktuell ad-hoc signiert. Das reicht für lokale/interne Builds. Für öffentliche Distribution braucht es später Developer-ID-Signing und Notarisierung.
+
+Nicht veröffentlichen:
+
+- `.build/`
+- lokale Testdaten
+- echte Schülerdaten
+- temporäre Logs
+
+## 5. Deployment Web statisch
 
 ### Nginx-Beispiel
 
@@ -81,9 +107,39 @@ server {
 </VirtualHost>
 ```
 
-## 5. Backup und Restore
+## 6. macOS Distribution
 
-### MVP
+### Intern
+
+```bash
+cd macos/SitzplanMac
+./scripts/build-app.sh
+open dist/Sitzplaner.app
+```
+
+Interne Weitergabe:
+
+- `.app` als ZIP packen
+- Version im Bundle prüfen
+- Start auf Zielsystem prüfen
+- Nutzerhinweis zu lokaler Datenspeicherung beilegen
+
+### Öffentlich später
+
+Erforderlich:
+
+- Apple Developer Account
+- Developer-ID-Zertifikat
+- Hardened Runtime prüfen
+- Notarisierung
+- signiertes DMG oder ZIP
+- dokumentierter Update-Prozess
+
+Nicht Teil des MVP. Der MVP soll Sitzpläne lösen, nicht das Apple-Distributionslabyrinth nachbauen.
+
+## 7. Backup und Restore
+
+### MVP Web
 
 Backups erfolgen über JSON-Export in der App.
 
@@ -99,9 +155,19 @@ Nutzerhinweis:
 Diese Datei kann personenbezogene Schülerdaten enthalten. Speichere sie geschützt und teile sie nicht unverschlüsselt.
 ```
 
+### MVP macOS
+
+Die macOS-App speichert lokal über `UserDefaults`. Bis ein kompatibler Export/Import umgesetzt ist, ist das Backup-Konzept eingeschränkt.
+
+Ziel:
+
+- gleicher JSON-Export wie Web
+- gleiche Schema-Version
+- Import/Export zwischen Web und macOS möglich
+
 ### Restore
 
-Ablauf:
+Ablauf Zielzustand:
 
 1. App öffnen
 2. Import auswählen
@@ -113,10 +179,11 @@ Wichtig:
 
 - fehlerhafte Imports dürfen vorhandene Daten nicht überschreiben
 - bei Schema-Versionen müssen Migrationen laufen
+- Web und macOS müssen dasselbe Schema verstehen
 
-## 6. Monitoring
+## 8. Monitoring
 
-### MVP
+### MVP Web
 
 Kein Server-Monitoring nötig, da statische App.
 
@@ -126,6 +193,17 @@ Sinnvolle Checks:
 - Hosting erreichbar
 - `index.html` wird ausgeliefert
 - Assets laden ohne 404
+
+### MVP macOS
+
+Kein Server-Monitoring.
+
+Sinnvolle Checks:
+
+- `swift build` erfolgreich
+- App-Bundle erzeugbar
+- App startet ohne Crash
+- lokale Speicherung funktioniert
 
 ### Optional später
 
@@ -138,25 +216,31 @@ Bei Backend:
 - Login-Fehler
 - Speicherverbrauch
 
-## 7. Logging
+## 9. Logging
 
 ### MVP-Regel
 
 Keine personenbezogenen Schülerdaten in Logs.
 
-Erlaubt:
+Erlaubt Web:
 
 ```ts
 console.error('Import failed: invalid schema');
 ```
 
-Nicht erlaubt:
+Nicht erlaubt Web:
 
 ```ts
 console.error('Import failed for student Max Mustermann', student);
 ```
 
-## 8. Security Headers
+Nicht erlaubt macOS:
+
+```swift
+print("Import failed for student \(student.name)")
+```
+
+## 10. Security Headers Web
 
 Für statisches Hosting sinnvoll:
 
@@ -169,27 +253,34 @@ Für statisches Hosting sinnvoll:
 
 CSP erst nach Test setzen, damit Vite-/Build-Assets sauber laufen.
 
-## 9. Rollback
+## 11. Rollback
 
-Bei statischem Hosting:
+### Web
 
 1. vorheriges `dist/` wiederherstellen
 2. CDN/Cache invalidieren
 3. Smoke-Test ausführen
 
-Rollback schützt nicht vor kaputten lokalen Browserdaten. Deshalb sind Storage-Migrationen releasekritisch.
+### macOS
 
-## 10. Release-Betrieb
+1. vorheriges `.app`/ZIP bereitstellen
+2. Nutzerhinweis zu Datenkompatibilität geben
+3. Start und lokale Daten prüfen
+
+Rollback schützt nicht vor kaputten lokalen Daten. Deshalb sind Storage-Migrationen releasekritisch.
+
+## 12. Release-Betrieb
 
 Vor jedem Release:
 
 - `docs/RELEASE_CHECKLIST.md` abarbeiten
-- Smoke-Test ausführen
+- Web-Smoke-Test ausführen
+- macOS-Smoke-Test ausführen, falls macOS betroffen
 - Export/Import prüfen
 - Druckansicht prüfen
 - README/CHANGELOG aktualisieren, falls vorhanden
 
-## 11. Späterer Backend-Betrieb
+## 13. Späterer Backend-Betrieb
 
 Erst nach ADR.
 
@@ -205,12 +296,14 @@ Mindestanforderungen:
 - Mandantentrennung
 - Migrationsstrategie
 
-## 12. Betriebsrisiken
+## 14. Betriebsrisiken
 
 | Risiko | MVP-Maßnahme |
 |---|---|
 | Browserdaten gelöscht | Exporthinweise und Projektdateien |
+| macOS-UserDefaults nicht portabel | kompatiblen Export/Import priorisieren |
 | fehlerhafte Migration | Tests + Backup-Hinweis vor Update |
-| kaputter Build | CI und Release-Checkliste |
+| kaputter Web-Build | CI und Release-Checkliste |
+| kaputter macOS-Build | SwiftPM-Build und App-Bundle-Check |
 | Hosting falsch konfiguriert | statische Server-Beispiele |
 | Datenschutzfehler | keine Telemetrie, keine Cloud im MVP |
