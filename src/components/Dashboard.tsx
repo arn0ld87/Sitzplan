@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Users,
   Layout,
@@ -7,9 +7,12 @@ import {
   Upload,
   Plus,
   Trash2,
-  AlertCircle
+  AlertCircle,
+  X,
+  CheckCircle2
 } from 'lucide-react';
 import type { SchoolClass, ClassroomLayout } from '../types';
+import { validateImportPayload, type ValidationError } from '../utils/validation';
 
 interface DashboardProps {
   classes: SchoolClass[];
@@ -35,25 +38,45 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onDeleteClass
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [importErrors, setImportErrors] = useState<ValidationError[] | null>(null);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const activeClass = classes.find((c) => c.id === activeClassId);
+
+  const resetImportFeedback = () => {
+    setParseError(null);
+    setImportErrors(null);
+    setImportSuccess(null);
+  };
 
   const handleImportFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
+    // Reset the input so the same file can be re-selected after an error.
+    event.target.value = '';
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = (e) => {
+      resetImportFeedback();
+      const text = (e.target?.result as string) ?? '';
+
+      let parsed: unknown;
       try {
-        const data = JSON.parse(e.target?.result as string);
-        if (data.classes && data.layout) {
-          onImportData(data);
-          alert('Daten erfolgreich importiert!');
-        } else {
-          alert('Ungültiges Dateiformat. Die Datei muss "classes" und "layout" enthalten.');
-        }
+        parsed = JSON.parse(text);
       } catch (err) {
-        alert('Fehler beim Lesen der Datei. Bitte stelle sicher, dass es sich um eine gültige JSON-Datei handelt.');
+        const message = err instanceof Error ? err.message : 'unbekannter Fehler';
+        setParseError(`Ungültige JSON-Datei: ${message}`);
+        return;
       }
+
+      const result = validateImportPayload(parsed);
+      if (!result.ok) {
+        setImportErrors(result.errors);
+        return;
+      }
+
+      onImportData(result.data);
+      setImportSuccess('Import erfolgreich übernommen.');
     };
     reader.readAsText(file);
   };
@@ -107,6 +130,140 @@ export const Dashboard: React.FC<DashboardProps> = ({
             style={{ display: 'none' }}
           />
         </div>
+
+        {parseError && (
+          <div
+            role="alert"
+            style={{
+              marginTop: '1.25rem',
+              padding: '0.85rem 1rem',
+              border: '1px solid var(--danger, #d33)',
+              background: 'var(--danger-light, rgba(220, 38, 38, 0.08))',
+              color: 'var(--ink, inherit)',
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '0.75rem'
+            }}
+          >
+            <AlertCircle size={20} style={{ color: 'var(--danger, #d33)', flexShrink: 0, marginTop: '0.15rem' }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>Import abgebrochen</div>
+              <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>{parseError}</div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                Bestehende Daten bleiben unverändert.
+              </div>
+            </div>
+            <button
+              type="button"
+              aria-label="Meldung schließen"
+              onClick={() => setParseError(null)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--text-muted)',
+                padding: '0.15rem'
+              }}
+            >
+              <X size={18} />
+            </button>
+          </div>
+        )}
+
+        {importErrors && importErrors.length > 0 && (
+          <div
+            role="alert"
+            style={{
+              marginTop: '1.25rem',
+              padding: '0.85rem 1rem',
+              border: '1px solid var(--danger, #d33)',
+              background: 'var(--danger-light, rgba(220, 38, 38, 0.08))',
+              color: 'var(--ink, inherit)',
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '0.75rem'
+            }}
+          >
+            <AlertCircle size={20} style={{ color: 'var(--danger, #d33)', flexShrink: 0, marginTop: '0.15rem' }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>
+                Import abgebrochen — {importErrors.length}{' '}
+                {importErrors.length === 1 ? 'Problem' : 'Probleme'}
+              </div>
+              <ul style={{
+                margin: 0,
+                paddingLeft: '1.1rem',
+                fontSize: '0.85rem',
+                color: 'var(--text-muted)',
+                fontFamily: 'var(--font-mono, ui-monospace, monospace)'
+              }}>
+                {importErrors.slice(0, 5).map((err, idx) => (
+                  <li key={idx} style={{ marginBottom: '0.2rem' }}>
+                    {err.path}: erwartet {err.expected}, war {err.actual}
+                  </li>
+                ))}
+              </ul>
+              {importErrors.length > 5 && (
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                  … und {importErrors.length - 5} weitere.
+                </div>
+              )}
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                Bestehende Daten bleiben unverändert.
+              </div>
+            </div>
+            <button
+              type="button"
+              aria-label="Meldung schließen"
+              onClick={() => setImportErrors(null)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--text-muted)',
+                padding: '0.15rem'
+              }}
+            >
+              <X size={18} />
+            </button>
+          </div>
+        )}
+
+        {importSuccess && (
+          <div
+            role="status"
+            style={{
+              marginTop: '1.25rem',
+              padding: '0.85rem 1rem',
+              border: '1px solid var(--success, #2a8)',
+              background: 'var(--success-light, rgba(34, 197, 94, 0.08))',
+              color: 'var(--ink, inherit)',
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem'
+            }}
+          >
+            <CheckCircle2 size={20} style={{ color: 'var(--success, #2a8)', flexShrink: 0 }} />
+            <div style={{ flex: 1, fontSize: '0.9rem' }}>{importSuccess}</div>
+            <button
+              type="button"
+              aria-label="Meldung schließen"
+              onClick={() => setImportSuccess(null)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--text-muted)',
+                padding: '0.15rem'
+              }}
+            >
+              <X size={18} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Stats Grid */}
