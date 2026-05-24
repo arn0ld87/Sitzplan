@@ -16,6 +16,7 @@ import { RoomEditor } from './components/RoomEditor';
 import { Generator } from './components/Generator';
 import { MOCK_CLASS, MOCK_CLASSROOM_LAYOUT } from './utils/mockData';
 import { loadClasses, loadLayout, saveClasses, saveLayout } from './utils/storage';
+import { newId } from './utils/ids';
 import './index.css';
 
 const DEFAULT_LAYOUT: ClassroomLayout = {
@@ -96,7 +97,7 @@ function App() {
   // Create new Class
   const handleCreateClass = (name: string) => {
     const newClass: SchoolClass = {
-      id: `class-${Date.now()}`,
+      id: newId('class'),
       name,
       students: [],
       rules: []
@@ -120,7 +121,7 @@ function App() {
     if (!activeClassId) return;
 
     const newStudent: Student = {
-      id: `student-${Date.now()}`,
+      id: newId('student'),
       name,
       specialNeeds
     };
@@ -182,7 +183,7 @@ function App() {
 
     const newRule: Rule = {
       ...rule,
-      id: `rule-${Date.now()}`
+      id: newId('rule')
     };
 
     const updatedClasses = classes.map((c) => {

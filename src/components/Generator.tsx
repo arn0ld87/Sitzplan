@@ -18,6 +18,7 @@ import type {
 } from '../types';
 import { generateSeatingPlan, evaluateSeating } from '../utils/solver';
 import { parseNaturalLanguageCommand } from '../utils/parser';
+import { newId } from '../utils/ids';
 
 interface GeneratorProps {
   students: Student[];
@@ -151,7 +152,7 @@ export const Generator: React.FC<GeneratorProps> = ({
 
     const userText = chatInput.trim();
     const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
+      id: newId('user'),
       sender: 'user',
       text: userText
     };
@@ -168,7 +169,7 @@ export const Generator: React.FC<GeneratorProps> = ({
       onUpdateStudents(result.updatedStudents);
 
       const aiMsg: ChatMessage = {
-        id: `ai-${Date.now()}`,
+        id: newId('ai'),
         sender: 'ai',
         text: `**Ergebnis**: ${result.parsedIntent}\n\n${result.explanation}\n\n*Ich habe die Berechnung des Sitzplans automatisch aktualisiert!*`
       };
