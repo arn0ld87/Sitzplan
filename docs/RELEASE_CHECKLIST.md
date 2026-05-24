@@ -2,7 +2,7 @@
 
 ## 1. Ziel
 
-Diese Checkliste wird vor jedem Release abgearbeitet. Sie verhindert, dass kaputte Builds, defekte Imports oder zerstörte Druckansichten veröffentlicht werden. Also das Minimum an Zivilisation im Softwarebetrieb.
+Diese Checkliste wird vor jedem Release abgearbeitet. Sie verhindert, dass kaputte Web-Builds, defekte Imports, zerstörte Druckansichten oder nicht startende macOS-Bundles veröffentlicht werden. Also das Minimum an Zivilisation im Softwarebetrieb.
 
 ## 2. Release-Daten
 
@@ -13,6 +13,7 @@ Release-Version:
 Release-Datum:
 Verantwortlich:
 Branch/Commit:
+Release-Typ: Web / macOS / beide
 ```
 
 ## 3. Vorbereitungen
@@ -20,11 +21,12 @@ Branch/Commit:
 - [ ] alle geplanten Issues für das Release geprüft
 - [ ] offene Blocker geklärt
 - [ ] README geprüft
+- [ ] `docs/MACOS_APP.md` geprüft, falls macOS betroffen
 - [ ] relevante Dokumentation aktualisiert
 - [ ] keine echten Schülerdaten in Testdaten oder Screenshots
 - [ ] keine lokalen Dateien im Commit
 
-## 4. Technische Checks
+## 4. Technische Checks Web
 
 ```bash
 npm ci
@@ -38,16 +40,39 @@ Falls Tests vorhanden:
 npm run test:run
 ```
 
-Checkliste:
+Checkliste Web:
 
 - [ ] `npm ci` erfolgreich
 - [ ] `npm run lint` erfolgreich
 - [ ] `npm run build` erfolgreich
 - [ ] Tests erfolgreich, falls vorhanden
 - [ ] keine neuen kritischen Warnings
-- [ ] `dist/` wurde korrekt erzeugt
+- [ ] Web-`dist/` wurde korrekt erzeugt
 
-## 5. Manuelle Smoke-Tests
+## 5. Technische Checks macOS
+
+Bei Änderungen unter `macos/SitzplanMac` oder bei macOS-Release:
+
+```bash
+cd macos/SitzplanMac
+swift build
+swift run SitzplanMac
+./scripts/build-app.sh
+open dist/Sitzplaner.app
+```
+
+Checkliste macOS:
+
+- [ ] `swift build` erfolgreich
+- [ ] `swift run SitzplanMac` startet
+- [ ] `./scripts/build-app.sh` erfolgreich
+- [ ] `dist/Sitzplaner.app` existiert
+- [ ] App-Bundle startet per `open dist/Sitzplaner.app`
+- [ ] `Info.plist` plausibel
+- [ ] ad-hoc Codesign läuft lokal durch
+- [ ] keine echten Schülerdaten in Logs
+
+## 6. Manuelle Smoke-Tests Web
 
 ### Start
 
@@ -112,29 +137,43 @@ Checkliste:
 - [ ] Import ungültiger Datei zerstört keine Daten
 - [ ] Nutzerhinweis zu personenbezogenen Daten sichtbar, sobald implementiert
 
-## 6. Datenschutz-Check
+## 7. Manuelle Smoke-Tests macOS
+
+- [ ] App startet ohne Crash
+- [ ] Fenster/UI erscheint korrekt
+- [ ] Klasse kann angelegt oder vorhandener Stand geladen werden
+- [ ] lokale Speicherung über Neustart hinweg geprüft
+- [ ] Raumlayout bleibt erhalten, falls Funktion vorhanden
+- [ ] aktive Klasse bleibt erhalten, falls Funktion vorhanden
+- [ ] Export/Import geprüft, sobald vorhanden
+- [ ] keine personenbezogenen Daten in Logs
+
+## 8. Datenschutz-Check
 
 - [ ] keine Telemetrie ergänzt
 - [ ] keine externen API-Calls mit Schülerdaten
-- [ ] keine Schülerdaten in Logs
+- [ ] keine Schülerdaten in Web-Logs
+- [ ] keine Schülerdaten in macOS-Logs
 - [ ] Exporthinweis vorhanden
 - [ ] keine echten Schülerdaten im Repo
+- [ ] macOS-`UserDefaults`-Nutzung ist dokumentiert
 
-## 7. Security-Check
+## 9. Security-Check
 
-- [ ] kein `dangerouslySetInnerHTML`
+- [ ] Web: kein `dangerouslySetInnerHTML`
 - [ ] keine Secrets im Repo
 - [ ] Dependencies geprüft
 - [ ] Importdaten werden validiert
 - [ ] keine unsicheren externen Skripte eingebunden
+- [ ] macOS-Bundle enthält keine lokalen Testdaten
 
-Optional:
+Optional Web:
 
 ```bash
 npm audit
 ```
 
-## 8. Deployment-Check
+## 10. Deployment-Check Web
 
 - [ ] statischer Build wurde deployed
 - [ ] Hosting liefert `index.html`
@@ -142,16 +181,33 @@ npm audit
 - [ ] Reload auf Unterseiten funktioniert, falls Routing eingeführt wurde
 - [ ] HTTPS aktiv, falls öffentlich bereitgestellt
 
-## 9. Rollback-Plan
+## 11. Distribution-Check macOS
+
+Interner Build:
+
+- [ ] `.app` wurde erzeugt
+- [ ] `.app` wurde lokal gestartet
+- [ ] ZIP/Artefakt enthält nur notwendige Dateien
+- [ ] Ziel-macOS-Version ist dokumentiert
+
+Öffentlicher Build später:
+
+- [ ] Developer-ID-Signing geplant
+- [ ] Notarisierung geplant
+- [ ] DMG/ZIP-Strategie dokumentiert
+- [ ] Update-Strategie dokumentiert
+
+## 12. Rollback-Plan
 
 Vor Release klären:
 
-- [ ] vorheriger Build verfügbar
+- [ ] vorheriger Web-Build verfügbar
+- [ ] vorheriges macOS-App-Bundle verfügbar, falls macOS-Release
 - [ ] Rollback-Pfad bekannt
 - [ ] bei Storage-Migration Backup-Hinweis vorhanden
 - [ ] bei Fehlern kann vorherige Version wieder ausgeliefert werden
 
-## 10. Release-Notizen
+## 13. Release-Notizen
 
 Template:
 
@@ -167,17 +223,23 @@ Template:
 ### Behoben
 - ...
 
+### Plattformen
+- Web: ...
+- macOS: ...
+
 ### Hinweise
 - Exportdateien können personenbezogene Daten enthalten.
+- Die macOS-App speichert lokal über UserDefaults.
 ```
 
-## 11. Freigabe
+## 14. Freigabe
 
 Release darf erfolgen, wenn:
 
 - [ ] keine kritischen Fehler offen sind
-- [ ] Build grün ist
+- [ ] relevante Builds grün sind
 - [ ] Smoke-Test bestanden ist
-- [ ] Import/Export geprüft ist
-- [ ] Druckansicht geprüft ist
+- [ ] Import/Export geprüft ist, falls betroffen
+- [ ] Druckansicht geprüft ist, falls Web betroffen
+- [ ] macOS-App-Bundle geprüft ist, falls macOS betroffen
 - [ ] Datenschutz-Check bestanden ist
