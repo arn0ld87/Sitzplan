@@ -466,6 +466,7 @@ export function generateSeatingPlan(
     assignments: bestAssignments,
     score: bestEval.score,
     violations: bestEval.violations,
-    explanation
+    explanation,
+    valid: hardViolations.length === 0
   };
 }
