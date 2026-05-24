@@ -37,8 +37,8 @@ Die App verarbeitet potenziell personenbezogene Schülerdaten. Fehler sind hier 
 
 | Testart | Werkzeug | Zweck | Pflicht |
 |---|---|---|---|
-| Web Typecheck | `npm run build` | TypeScript + Vite Build | ja |
-| Web Lint | `npm run lint` | statische Codequalität | ja |
+| Web Typecheck | `pnpm build` | TypeScript + Vite Build | ja |
+| Web Lint | `pnpm lint` | statische Codequalität | ja |
 | Web Unit Tests | Vitest | Solver, Parser, Storage | ja ab Milestone 1 |
 | Web Component Tests | Testing Library | zentrale Komponenten | soll |
 | Web E2E Smoke | Playwright | Hauptworkflow im Browser | soll |
@@ -70,16 +70,16 @@ Zielzustand in `package.json`:
 Web:
 
 ```bash
-npm run lint
-npm run build
-npm run test:run
+pnpm lint
+pnpm build
+pnpm test:run
 ```
 
 Falls Tests noch nicht eingeführt sind:
 
 ```bash
-npm run lint
-npm run build
+pnpm lint
+pnpm build
 ```
 
 macOS bei Änderungen unter `macos/SitzplanMac`:

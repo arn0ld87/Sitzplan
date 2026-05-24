@@ -10,8 +10,8 @@ Das ist technisch schlicht, datenschutzfreundlich und deutlich weniger anfällig
 
 | Variante | Beschreibung | Empfehlung |
 |---|---|---|
-| Web lokal via Dev Server | `npm run dev` | Entwicklung Web |
-| Web statischer Build | `npm run build` + `dist/` ausliefern | MVP-Produktion Web |
+| Web lokal via Dev Server | `pnpm dev` | Entwicklung Web |
+| Web statischer Build | `pnpm build` + `dist/` ausliefern | MVP-Produktion Web |
 | GitHub Pages | statisches Hosting aus `dist/` | einfach |
 | Cloudflare Pages/Netlify | automatischer Build aus Git | komfortabel |
 | eigener Webserver | Nginx/Apache liefert `dist/` | self-hosted Web |
@@ -22,9 +22,9 @@ Das ist technisch schlicht, datenschutzfreundlich und deutlich weniger anfällig
 ## 3. Build Web
 
 ```bash
-npm ci
-npm run lint
-npm run build
+pnpm install --frozen-lockfile
+pnpm lint
+pnpm build
 ```
 
 Build-Ergebnis:

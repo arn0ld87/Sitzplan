@@ -131,14 +131,14 @@ Bewusste Verzichte:
 Voraussetzungen Web-App:
 
 - Node.js 18+
-- npm (oder pnpm/yarn — `package-lock.json` ist npm)
+- pnpm 9+ (`npm install -g pnpm` falls noch nicht vorhanden)
 
 ```bash
 git clone https://github.com/arn0ld87/Sitzplan.git
 cd Sitzplan
 
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 Browser öffnen: <http://localhost:5173> (fallback 5174, wenn 5173 belegt).
@@ -156,10 +156,11 @@ swift run SitzplanMac
 ### Scripts
 
 ```bash
-npm run dev      # Vite dev server mit HMR
-npm run build    # tsc -b && vite build → dist/
-npm run lint     # eslint .
-npm run preview  # serve dist/ lokal
+pnpm dev         # Vite dev server mit HMR
+pnpm build       # tsc -b && vite build → dist/
+pnpm lint        # eslint .
+pnpm test        # vitest run (sobald Slice 6 gemerged ist)
+pnpm preview     # serve dist/ lokal
 ```
 
 macOS:

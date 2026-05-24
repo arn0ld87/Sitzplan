@@ -56,8 +56,8 @@ Slice-Tracking (Branch `feat/milestone-1`):
 
 Abnahme:
 
-- `npm run lint` grün — **offen**: 9 pre-existing Errors (Generator/parser/solver), kein M1-Regress, Cleanup als Folgearbeit
-- `npm run build` grün — erfüllt
+- `pnpm lint` grün — **offen**: 9 pre-existing Errors (Generator/parser/solver), kein M1-Regress, Cleanup als Folgearbeit
+- `pnpm build` grün — erfüllt
 - Solver-Basistests grün — offen, Slice 6
 - Import kaputter JSON-Dateien zerstört keine Daten — erfüllt (Slice 2)
 - vorhandene Nutzerdaten werden migriert — erfüllt (Slice 1, v0 → v1)

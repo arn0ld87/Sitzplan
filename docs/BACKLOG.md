@@ -50,8 +50,8 @@ Akzeptanzkriterien:
 
 Akzeptanzkriterien:
 
-- GitHub Actions für `npm ci`, `npm run lint`, `npm run build`
-- später zusätzlich `npm test -- --run`
+- GitHub Actions für `pnpm install --frozen-lockfile`, `pnpm lint`, `pnpm build`
+- später zusätzlich `pnpm test`
 - macOS-Pfadänderungen lösen mindestens `swift build` aus
 - PRs ohne grüne relevante Builds gelten als nicht mergefähig
 
@@ -70,7 +70,7 @@ Akzeptanzkriterien:
 
 Akzeptanzkriterien:
 
-- `npm test` existiert
+- `pnpm test` existiert
 - Solver-Basistests vorhanden
 - Parser-Basistests vorhanden
 - Storage-Migrationstest vorhanden

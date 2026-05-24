@@ -104,7 +104,7 @@ Vor Backend-Einführung erforderlich:
 | Broken Access Control | ohne Backend nicht relevant, später Rollenmodell |
 | Sensitive Data Exposure | lokal-first, keine Telemetrie |
 | Security Misconfiguration | statische App minimal halten |
-| Vulnerable Components | npm audit prüfen, Dependencies klein halten |
+| Vulnerable Components | `pnpm audit` prüfen, Dependencies klein halten |
 
 ## 10. Release-Sicherheitscheck
 
@@ -114,5 +114,5 @@ Vor Release prüfen:
 - keine Debug-Ausgaben mit Schülerdaten
 - Importvalidierung aktiv
 - Exporthinweis vorhanden
-- `npm audit` geprüft
+- `pnpm audit` geprüft
 - Build enthält keine `.env` oder lokalen Dateien

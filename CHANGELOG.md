@@ -19,7 +19,7 @@ Branch: `feat/milestone-1`. Stand: 2026-05-25.
 - Diagnose-Anzeige im Generator: rotes "UNGÜLTIG"-Badge pro Vorschlag mit Hard-Violations, Top-Level-Diagnose-Panel mit aggregierter Liste der blockierenden Regeln, wenn kein Vorschlag gültig ist.
 - Bestätigungsdialog vor Schülerlöschung (`StudentMgmt.tsx`).
 - Automatische Regel-Bereinigung beim Schülerlöschen — Regeln mit Bezug auf den gelöschten Schüler werden entfernt.
-- GitHub Actions Workflow `.github/workflows/ci.yml` (Pflichtenheft §7) — Lint, Build, optional Tests, mit Concurrency-Cancel.
+- GitHub Actions Workflow `.github/workflows/ci.yml` (orientiert an Pflichtenheft §7, auf pnpm umgestellt) — `pnpm install --frozen-lockfile`, `pnpm lint`, `pnpm build`, optional `pnpm test`, mit Concurrency-Cancel.
 - ADR 0002 (`docs/adr/0002-storage-schema-versioning.md`).
 
 ### Geändert
@@ -35,5 +35,6 @@ Branch: `feat/milestone-1`. Stand: 2026-05-25.
 ### Bekannt offen
 
 - ESLint zeigt 9 Probleme (8 Errors, 1 Warning) aus pre-existing Code in `Generator.tsx`, `parser.ts`, `solver.ts`. Kein M1-Regress; CI-Workflow ist aktiv, läuft aber rot bis zur Lint-Bereinigung. Aufgabe für Folge-Slice.
+- Paket-Manager-Konvention auf **pnpm** vereinheitlicht (CLAUDE.md, CI, Docs). `package-lock.json` als Altlast zu entfernen, sobald Slice 6 mit Test-Deps gemerged ist.
 - Vitest und Tests fehlen noch (Slice 6 in Arbeit).
 - Export-Dateiname und -Format weichen vom Pflichtenheft-Ziel (`SitzplanerProjectFile` mit `exportedAt`, `appVersion`) ab. Validierung akzeptiert bereits beide Formen, Export-Pfad bleibt aber unverändert — Folgearbeit.

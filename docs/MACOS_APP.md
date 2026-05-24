@@ -96,7 +96,7 @@ Diese Regeln gelten für Web-App und macOS-App:
 | Bereich | Web-App | macOS-App |
 |---|---|---|
 | UI-Technik | React/TypeScript | SwiftUI |
-| Build | `npm run build` | `swift build` |
+| Build | `pnpm build` | `swift build` |
 | Start | Browser/Vite | `swift run SitzplanMac` |
 | Persistenz | `localStorage` | `UserDefaults` |
 | Bundle | `dist/` | `dist/Sitzplaner.app` |
