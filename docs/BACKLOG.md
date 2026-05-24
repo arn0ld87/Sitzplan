@@ -11,6 +11,8 @@
 
 ## P0 – Sofort relevant
 
+> Status 2026-05-25: P0-Items "Storage versionieren", "Import validieren", "Solver-Hard-Constraints härten" sind auf `feat/milestone-1` umgesetzt. CI eingerichtet (Job grün, sobald Lint-Baseline geräumt ist). Solver-Tests (P1) als Slice 6 noch offen. macOS-Build-Härtung separat.
+
 ### Storage versionieren
 
 **Problem:** Aktuell liegen Daten direkt in `localStorage` bzw. in der macOS-App in `UserDefaults`. Ohne Schema-Version sind spätere Änderungen riskant.
