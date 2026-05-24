@@ -7,6 +7,7 @@ import type {
   SeatingViolation,
   SeatingProposal
 } from '../types';
+import { newId } from './ids';
 
 // Helper: Calculate distance between two room elements
 function getDistance(el1: { x: number; y: number }, el2: { x: number; y: number }): number {
@@ -461,7 +462,7 @@ export function generateSeatingPlan(
   }
 
   return {
-    id: `proposal-${preset}-${Date.now()}`,
+    id: newId(`proposal-${preset}`),
     name: presetName,
     assignments: bestAssignments,
     score: bestEval.score,

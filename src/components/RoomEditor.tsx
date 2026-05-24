@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import type { ClassroomElement, ClassroomLayout, ElementType } from '../types';
 import { MOCK_CLASSROOM_LAYOUT } from '../utils/mockData';
+import { newId } from '../utils/ids';
 
 interface RoomEditorProps {
   layout: ClassroomLayout;
@@ -96,7 +97,7 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
     }
 
     const newElement: ClassroomElement = {
-      id: `${selectedTool}-${Date.now()}`,
+      id: newId(selectedTool),
       type: selectedTool,
       x: gridX,
       y: gridY,
