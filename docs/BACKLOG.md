@@ -13,7 +13,7 @@
 
 ### Storage versionieren
 
-**Problem:** Aktuell liegen Daten direkt in `localStorage`. Ohne Schema-Version sind spätere Änderungen riskant.
+**Problem:** Aktuell liegen Daten direkt in `localStorage` bzw. in der macOS-App in `UserDefaults`. Ohne Schema-Version sind spätere Änderungen riskant.
 
 Akzeptanzkriterien:
 
@@ -21,6 +21,7 @@ Akzeptanzkriterien:
 - App erkennt alte Daten
 - Migration läuft ohne Datenverlust
 - fehlerhafte Daten werden nicht überschrieben
+- Web und macOS bekommen perspektivisch ein kompatibles Projektschema
 
 ### Import validieren
 
@@ -49,7 +50,17 @@ Akzeptanzkriterien:
 
 - GitHub Actions für `npm ci`, `npm run lint`, `npm run build`
 - später zusätzlich `npm test -- --run`
-- PRs ohne grünen Build gelten als nicht mergefähig
+- macOS-Pfadänderungen lösen mindestens `swift build` aus
+- PRs ohne grüne relevante Builds gelten als nicht mergefähig
+
+### macOS-Build absichern
+
+Akzeptanzkriterien:
+
+- `cd macos/SitzplanMac && swift build` dokumentiert und geprüft
+- `./scripts/build-app.sh` erzeugt `dist/Sitzplaner.app`
+- App-Bundle startet lokal
+- keine echten Schülerdaten in macOS-Logs
 
 ## P1 – MVP verbessern
 
@@ -86,6 +97,16 @@ Akzeptanzkriterien:
 - Exportdatei enthält Metadaten
 - Dateiname enthält Datum
 - Import erkennt App-Format
+- Exportformat ist als Ziel auch für macOS nutzbar
+
+### Web-/macOS-Datenkompatibilität klären
+
+Akzeptanzkriterien:
+
+- gemeinsames JSON-Schema dokumentiert
+- Web-Export und macOS-Import als Ziel definiert
+- macOS-Export und Web-Import als Ziel definiert
+- Drift-Risiken zwischen TypeScript- und Swift-Modellen dokumentiert
 
 ## P2 – Produktreife
 
@@ -121,6 +142,15 @@ Akzeptanzkriterien:
 - oder PDF-Export per Client-Library evaluiert
 - Datenschutz bleibt lokal
 
+### macOS-Distribution verbessern
+
+Akzeptanzkriterien:
+
+- App-Icon definiert
+- Bundle-Version gepflegt
+- Release-Artefakt als ZIP oder DMG vorbereitet
+- Notarisierung als spätere Option dokumentiert
+
 ## P3 – Später
 
 ### Optionales Backend
@@ -147,10 +177,20 @@ Akzeptanzkriterien:
 - lokal oder optional konfigurierbar
 - Parser bleibt als Fallback erhalten
 
+### Auto-Update macOS prüfen
+
+Akzeptanzkriterien:
+
+- Sparkle oder Alternative bewertet
+- Signatur-/Update-Risiken dokumentiert
+- nicht vor produktreifer lokaler Version umsetzen
+
 ## Technische Schulden
 
 - `Date.now()`-IDs durch `crypto.randomUUID()` ersetzen
 - Storage-Zugriff aus `App.tsx` in Utility auslagern
 - Solver in kleinere Einheiten zerlegen
 - UI-Strings langfristig strukturieren, auch ohne vollständiges i18n
+- Web- und macOS-Datenmodelle fachlich abgleichen
+- gemeinsame JSON-Fixtures für Solver/Import/Export erstellen
 - README ggf. von Template-Resten befreien, falls noch vorhanden
