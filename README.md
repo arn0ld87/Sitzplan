@@ -2,27 +2,28 @@
 
 # Sitzplaner
 
-**Web-App für Lehrkräfte zur konfliktfreien Sitzplan-Erstellung mit Constraint-Solver, Drag&Drop-Raumeditor und KI-Befehlszeile.**
+**Lokaler Sitzplaner für Lehrkräfte zur konfliktfreien Sitzplan-Erstellung mit Constraint-Solver, Drag&Drop-Raumeditor und KI-Befehlszeile.**
 
-Klassen anlegen, Schüler:innen mit Förderbedarfen verwalten, harte und weiche Sitzregeln definieren, Raumlayouts visuell bauen und drei bewertete Sitzplan-Vorschläge generieren — alles lokal im Browser, ohne Backend.
+Klassen anlegen, Schüler:innen mit Förderbedarfen verwalten, harte und weiche Sitzregeln definieren, Raumlayouts visuell bauen und drei bewertete Sitzplan-Vorschläge generieren — lokal-first, ohne Backend-Zwang.
 
 [![Repository](https://img.shields.io/badge/GitHub-arn0ld87%2FSitzplan-111?style=flat-square&logo=github)](https://github.com/arn0ld87/Sitzplan)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vite.dev/)
-[![Storage](https://img.shields.io/badge/Storage-localStorage-555?style=flat-square)](#persistenz)
+[![macOS](https://img.shields.io/badge/macOS-SwiftUI-000?style=flat-square&logo=apple)](./macos/SitzplanMac)
+[![Storage](https://img.shields.io/badge/Storage-localStorage%20%2F%20UserDefaults-555?style=flat-square)](#persistenz)
 
-[Quickstart](#quickstart) · [Features](#features) · [Architektur](#architektur) · [Solver](#solver) · [Datenmodell](#datenmodell) · [Druck](#druck)
+[Quickstart](#quickstart) · [macOS-App](#native-macos-app) · [Features](#features) · [Architektur](#architektur) · [Solver](#solver) · [Datenmodell](#datenmodell) · [Druck](#druck)
 
 </div>
 
 ---
 
-> **Status:** Aktive Entwicklung. Kein Backend, keine Cloud, keine Accounts. Alle Daten leben in deinem Browser-Profil (`localStorage`). Export/Import als JSON ist vorgesehen.
+> **Status:** Aktive Entwicklung. Kein Backend, keine Cloud, keine Accounts. Die Web-App speichert im Browser-Profil (`localStorage`), die native macOS-App speichert lokal über `UserDefaults`. Export/Import als JSON ist vorgesehen.
 
 ## Was ist der Sitzplaner?
 
-Eine Single-Page-React-App, die das wiederkehrende Problem aus dem Lehralltag löst: einen Sitzplan zu bauen, der alle pädagogischen Vorgaben gleichzeitig respektiert — bestimmte Schüler:innen nicht nebeneinander, Förderkinder vorne, befreundete Paare wenn möglich zusammen, Linkshänder am Rand, gute Sicht zur Tafel.
+Eine lokale Sitzplan-App, die das wiederkehrende Problem aus dem Lehralltag löst: einen Sitzplan zu bauen, der alle pädagogischen Vorgaben gleichzeitig respektiert — bestimmte Schüler:innen nicht nebeneinander, Förderkinder vorne, befreundete Paare wenn möglich zusammen, Linkshänder am Rand, gute Sicht zur Tafel.
 
 Manuell ist das in einer 28er-Klasse mit fünf Regeln in fünfzehn Minuten unlösbar. Der Solver braucht dafür weniger als eine Sekunde und liefert dazu drei Varianten mit unterschiedlicher Gewichtung.
 
@@ -37,13 +38,14 @@ Typische Einsätze:
 - Klassenzimmer mit beliebigem Möbel-Layout abbilden (Reihen, U-Form, Gruppentische, Einzeltische)
 - Sitzpläne ausdrucken oder als PDF an Vertretungslehrkräfte weitergeben
 - Mehrere Klassen parallel pflegen
+- Web-App oder native macOS-App lokal verwenden
 
 Nicht-Ziele:
 
 - kein Notenbuch
 - kein Stundenplan
 - keine Anwesenheitserfassung
-- keine Cloud-Synchronisation, kein Multi-Device-Setup
+- keine verpflichtende Cloud-Synchronisation, kein verpflichtendes Multi-Device-Setup
 - keine Schüler-Login-Flächen
 
 ## Features
@@ -56,15 +58,43 @@ Nicht-Ziele:
 | **Raumeditor** | SVG-basierter Drag&Drop für Tische, Tafel, Fenster, Tür — beliebige Layouts |
 | **Generator** | Drei Vorschläge gleichzeitig: *Ausgewogen*, *Fokus*, *Freundschaft* — mit Score und Erklärung |
 | **KI-Befehle** | Chat-Panel mit Light-NLP-Parser für "Setze X neben Y", "Trenne A und B", "Lisa nach vorn" |
-| **Persistenz** | `localStorage`, JSON-Export/Import für Backups oder Schulwechsel |
+| **Persistenz Web** | `localStorage`, JSON-Export/Import für Backups oder Schulwechsel |
+| **Persistenz macOS** | `UserDefaults`, lokale Desktop-Nutzung ohne Backend |
 | **Theming** | Helles und dunkles Theme (Toggle persistent) |
 | **Druck** | Optimiertes Print-CSS für DIN A4 quer mit Schüler-Legende |
+
+## Native macOS-App
+
+Neben der Web-App enthält das Repo eine native macOS-Version unter [`macos/SitzplanMac`](./macos/SitzplanMac).
+
+```bash
+cd macos/SitzplanMac
+swift build
+swift run SitzplanMac
+```
+
+App-Bundle erstellen:
+
+```bash
+cd macos/SitzplanMac
+./scripts/build-app.sh
+open dist/Sitzplaner.app
+```
+
+Die macOS-App ist ein SwiftPM/SwiftUI-Projekt für macOS 13+ und speichert lokal über `UserDefaults`. Sie hat kein Backend, keine Authentifizierung und keine Cloud-Synchronisierung. Details: [`docs/MACOS_APP.md`](./docs/MACOS_APP.md).
 
 ## Architektur
 
 ```text
-React 19 + TypeScript + Vite 8 (Client-only)
-  └─ Single-Page-App, kein Routing-Lib, Tab-State in App.tsx
+Sitzplaner
+├─ Web-App
+│  ├─ React 19 + TypeScript + Vite 8
+│  ├─ Single-Page-App, kein Routing-Lib, Tab-State in App.tsx
+│  └─ Persistenz: localStorage
+└─ macOS-App
+   ├─ SwiftPM + SwiftUI
+   ├─ Mindestplattform macOS 13
+   └─ Persistenz: UserDefaults
 
 src/
   App.tsx              Shell, Tab-Routing, globaler State (classes, layout, theme), localStorage-Bridge
@@ -81,11 +111,16 @@ src/
     solver.ts          Sitzplan-Berechnung (drei Profile)
     parser.ts          NLP-Light für KI-Chat-Befehle
     mockData.ts        Beispielklasse 8b
+
+macos/SitzplanMac/
+  Package.swift        SwiftPM-Konfiguration
+  README.md            macOS-Build- und Run-Hinweise
+  scripts/build-app.sh App-Bundle-Erzeugung
 ```
 
 Bewusste Verzichte:
 
-- **Kein UI-Framework** außer `lucide-react` für Icons
+- **Kein UI-Framework** außer `lucide-react` für Icons in der Web-App
 - **Kein CSS-in-JS, kein Tailwind** — CSS-Variablen als Design-Tokens
 - **Kein State-Manager** (Redux/Zustand) — `useState` in `App.tsx` reicht
 - **Kein Router** — Tabs werden über lokalen State umgeschaltet
@@ -93,7 +128,7 @@ Bewusste Verzichte:
 
 ## Quickstart
 
-Voraussetzungen:
+Voraussetzungen Web-App:
 
 - Node.js 18+
 - npm (oder pnpm/yarn — `package-lock.json` ist npm)
@@ -108,6 +143,16 @@ npm run dev
 
 Browser öffnen: <http://localhost:5173> (fallback 5174, wenn 5173 belegt).
 
+Voraussetzungen macOS-App:
+
+- macOS 13+
+- Xcode Command Line Tools / Swift 5.10+
+
+```bash
+cd macos/SitzplanMac
+swift run SitzplanMac
+```
+
 ### Scripts
 
 ```bash
@@ -115,6 +160,15 @@ npm run dev      # Vite dev server mit HMR
 npm run build    # tsc -b && vite build → dist/
 npm run lint     # eslint .
 npm run preview  # serve dist/ lokal
+```
+
+macOS:
+
+```bash
+cd macos/SitzplanMac
+swift build              # SwiftPM build
+swift run SitzplanMac    # native App starten
+./scripts/build-app.sh   # dist/Sitzplaner.app erzeugen
 ```
 
 ## Solver
@@ -175,7 +229,7 @@ type ClassroomLayout = {
 
 ## Persistenz
 
-Drei `localStorage`-Keys:
+Web-App `localStorage`-Keys:
 
 | Key | Inhalt |
 |---|---|
@@ -183,9 +237,15 @@ Drei `localStorage`-Keys:
 | `sitzplaner_layout` | Aktuelles Klassenzimmer-Layout |
 | `sitzplaner_theme` | `light` oder `dark` |
 
-Backup-Workflow: Im Dashboard auf *Export* klicken → JSON wird heruntergeladen. *Import* überschreibt den lokalen Stand.
+macOS-App:
 
-**Warnung:** Browser-Cache-Reset oder Wechsel des Browser-Profils löscht alle Daten. Vor Schulwechsel oder Geräte-Wechsel exportieren.
+| Speicher | Inhalt |
+|---|---|
+| `UserDefaults` | Klassen, Raumlayout und aktive Klasse |
+
+Backup-Workflow Web: Im Dashboard auf *Export* klicken → JSON wird heruntergeladen. *Import* überschreibt den lokalen Stand nach Validierung.
+
+**Warnung:** Browser-Cache-Reset oder Wechsel des Browser-Profils löscht Web-Daten. Vor Schulwechsel oder Geräte-Wechsel exportieren. macOS-Daten liegen lokal in der App-Umgebung und brauchen ebenfalls ein Backup-/Exportkonzept.
 
 ## Druck
 
@@ -214,11 +274,11 @@ Dark Mode wird via `data-theme="dark"` auf `<html>` getoggelt.
 
 ## Grenzen
 
-- **Single-User, Single-Browser.** Kein Sync, kein Sharing.
+- **Single-User, Single-Browser bzw. lokale Desktop-Nutzung.** Kein Sync, kein Sharing.
 - **Solver ist Greedy.** Bei sehr großen Klassen (40+) oder vielen widersprüchlichen Regeln kann es passieren, dass kein konfliktfreier Plan existiert — der Solver meldet das.
 - **Keine Validierung von Schülernamen.** Tippfehler bleiben Tippfehler.
 - **KI-Chat ist regelbasiert**, kein echtes LLM. Versteht klare Imperative ("Setze X neben Y"), aber keinen Smalltalk.
-- **Datenschutz liegt bei dir.** Schülernamen verlassen den Browser nicht — solange du keinen JSON-Export auf einem fremden Gerät öffnest.
+- **Datenschutz liegt bei dir.** Schülernamen verlassen die App nicht — solange du keinen JSON-Export auf einem fremden Gerät öffnest.
 
 ## Entwicklungsstatus
 
@@ -229,6 +289,7 @@ Aktiv in Entwicklung. Aktueller Fokus:
 - PDF-Export ohne Browser-Print-Dialog
 - Klassen-Templates (z.B. "Grundschule 4. Klasse")
 - bessere Mobile-Ansicht für den Raumeditor
+- Abgleich Web-App ↔ native macOS-App
 
 Beiträge willkommen via Issue oder PR.
 
