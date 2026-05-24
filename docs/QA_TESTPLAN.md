@@ -2,7 +2,7 @@
 
 ## 1. Ziel
 
-Dieser Testplan definiert, wie der Sitzplaner vor Änderungen, Pull Requests und Releases geprüft wird. Schwerpunkt sind Datenintegrität, Solver-Korrektheit, Import/Export, Bedienbarkeit und Druckansicht.
+Dieser Testplan definiert, wie der Sitzplaner vor Änderungen, Pull Requests und Releases geprüft wird. Schwerpunkt sind Datenintegrität, Solver-Korrektheit, Import/Export, Bedienbarkeit, Druckansicht und die native macOS-App.
 
 Die App verarbeitet potenziell personenbezogene Schülerdaten. Fehler sind hier nicht nur kosmetisch, sondern können Datenverlust oder falsche Sitzpläne verursachen. Also ausnahmsweise testen wir, bevor das Chaos Produktion heißt.
 
@@ -10,14 +10,19 @@ Die App verarbeitet potenziell personenbezogene Schülerdaten. Fehler sind hier 
 
 ### In Scope
 
-- Build und TypeScript-Kompilierung
+- Web-Build und TypeScript-Kompilierung
 - ESLint
+- SwiftPM-Build der macOS-App
+- macOS-App-Bundle-Erzeugung
 - Solver-Logik
 - Parser für KI-Befehle
 - Storage und Migrationen
+- Web: `localStorage`
+- macOS: `UserDefaults`
 - Import/Export
 - zentrale UI-Flows
-- Druckansicht
+- Druckansicht Web
+- lokale macOS-App-Nutzung
 - manuelle Smoke-Tests
 
 ### Out of Scope MVP
@@ -26,19 +31,23 @@ Die App verarbeitet potenziell personenbezogene Schülerdaten. Fehler sind hier 
 - Authentifizierung
 - Lasttests für Server
 - Multi-User-Konflikte
+- Apple Notarisierung als Pflichtprozess
 
 ## 3. Testarten
 
 | Testart | Werkzeug | Zweck | Pflicht |
 |---|---|---|---|
-| Typecheck | `npm run build` | TypeScript + Vite Build | ja |
-| Lint | `npm run lint` | statische Codequalität | ja |
-| Unit Tests | Vitest | Solver, Parser, Storage | ja ab Milestone 1 |
-| Component Tests | Testing Library | zentrale Komponenten | soll |
-| E2E Smoke | Playwright | Hauptworkflow im Browser | soll |
-| Manuell | Browser + Print Preview | UX und Druck | ja vor Release |
+| Web Typecheck | `npm run build` | TypeScript + Vite Build | ja |
+| Web Lint | `npm run lint` | statische Codequalität | ja |
+| Web Unit Tests | Vitest | Solver, Parser, Storage | ja ab Milestone 1 |
+| Web Component Tests | Testing Library | zentrale Komponenten | soll |
+| Web E2E Smoke | Playwright | Hauptworkflow im Browser | soll |
+| macOS Build | `swift build` | SwiftPM-Projekt baut | ja bei macOS-Änderungen |
+| macOS Run | `swift run SitzplanMac` | App startet lokal | ja bei macOS-Änderungen |
+| macOS Bundle | `./scripts/build-app.sh` | `.app` erzeugbar | ja vor macOS-Release |
+| Manuell | Browser + macOS-App + Print Preview | UX, Druck, lokale Nutzung | ja vor Release |
 
-## 4. Empfohlene Test-Scripts
+## 4. Empfohlene Test-Scripts Web
 
 Zielzustand in `package.json`:
 
@@ -58,6 +67,8 @@ Zielzustand in `package.json`:
 
 ## 5. Pflicht-Checks vor jedem Commit
 
+Web:
+
 ```bash
 npm run lint
 npm run build
@@ -71,7 +82,16 @@ npm run lint
 npm run build
 ```
 
-## 6. Unit-Test-Prioritäten
+macOS bei Änderungen unter `macos/SitzplanMac`:
+
+```bash
+cd macos/SitzplanMac
+swift build
+swift run SitzplanMac
+./scripts/build-app.sh
+```
+
+## 6. Unit-Test-Prioritäten Web
 
 ### 6.1 Solver
 
@@ -124,7 +144,41 @@ Pflichttests:
 - Export enthält Metadaten
 - Import validiert Pflichtfelder
 
-## 7. Component-/UI-Tests
+## 7. macOS-Testprioritäten
+
+### 7.1 Build und Start
+
+Pflichttests manuell oder später automatisiert:
+
+- `swift build` läuft erfolgreich
+- `swift run SitzplanMac` startet die App
+- `./scripts/build-app.sh` erzeugt `dist/Sitzplaner.app`
+- `open dist/Sitzplaner.app` öffnet die App
+- `Info.plist` enthält korrekten Bundle-Namen und Mindestversion
+- ad-hoc Codesigning läuft lokal durch
+
+### 7.2 Persistenz
+
+Pflichttests:
+
+- Klasse anlegen
+- App schließen
+- App öffnen
+- Klasse ist weiterhin vorhanden
+- Raumlayout bleibt erhalten
+- aktive Klasse bleibt erhalten
+- keine Schülerdaten werden in Logs ausgegeben
+
+### 7.3 Web-/macOS-Kompatibilität
+
+Sobald Export/Import auf beiden Plattformen existiert:
+
+- Web-Export in macOS importierbar
+- macOS-Export in Web importierbar
+- Schema-Version wird auf beiden Seiten erkannt
+- ungültige Datei zerstört auf keiner Plattform vorhandene Daten
+
+## 8. Component-/UI-Tests Web
 
 Priorität:
 
@@ -142,7 +196,7 @@ Akzeptanz:
 - Generator zeigt Warnung bei zu wenigen Sitzplätzen
 - Exportbutton erzeugt Dateiinhalt im erwarteten Format
 
-## 8. E2E-Smoke-Test
+## 9. E2E-Smoke-Test Web
 
 Minimaler Playwright-Flow:
 
@@ -156,7 +210,7 @@ Minimaler Playwright-Flow:
 8. Export auslösen
 9. Druckansicht öffnen oder Print-CSS-Snapshot prüfen
 
-## 9. Manuelle Release-Prüfung
+## 10. Manuelle Release-Prüfung
 
 Browser:
 
@@ -164,7 +218,12 @@ Browser:
 - Firefox
 - Safari, falls verfügbar
 
-Checkliste:
+macOS:
+
+- macOS 13 oder neuer
+- Swift 5.10 oder kompatibel
+
+Checkliste Web:
 
 - App startet ohne Console-Fehler
 - Light/Dark Mode funktioniert
@@ -178,7 +237,16 @@ Checkliste:
 - Export/Import funktioniert
 - ungültiger Import beschädigt keine Daten
 
-## 10. Testdaten
+Checkliste macOS:
+
+- SwiftPM-Build grün
+- App startet ohne Crash
+- App-Bundle startet
+- lokale Daten bleiben nach Neustart erhalten
+- keine echten Schülerdaten in Logs
+- Bundle-Metadaten plausibel
+
+## 11. Testdaten
 
 Mindestens drei Testklassen pflegen:
 
@@ -188,22 +256,27 @@ Mindestens drei Testklassen pflegen:
 | normal | 25 Schüler:innen, typische Schulklasse |
 | konflikt | absichtlich widersprüchliche Regeln |
 
-## 11. Fehlerklassifizierung
+Diese Testdaten sollten perspektivisch als JSON-Testfixtures für Web und macOS gemeinsam nutzbar sein.
+
+## 12. Fehlerklassifizierung
 
 | Klasse | Beispiel | Release-Blocker |
 |---|---|---|
 | Kritisch | Datenverlust, kaputter Import, falsche Hard-Regeln | ja |
 | Hoch | Generator liefert keine Vorschläge bei gültigen Eingaben | ja |
+| Hoch | macOS-App startet nicht nach Build | ja für macOS-Release |
 | Mittel | UI-Fehler ohne Datenverlust | abhängig |
 | Niedrig | Textfehler, kleine Layoutprobleme | nein |
 
-## 12. Definition of Done QA
+## 13. Definition of Done QA
 
 Eine Änderung ist QA-fertig, wenn:
 
-- Build grün ist
-- Lint grün ist
+- Web-Build grün ist, falls Web betroffen
+- Web-Lint grün ist, falls Web betroffen
+- Swift-Build grün ist, falls macOS betroffen
 - betroffene Unit-Tests grün sind
 - Import/Export nicht gebrochen wurde
-- Print-Ansicht bei UI-Änderungen geprüft wurde
+- Print-Ansicht bei Web-UI-Änderungen geprüft wurde
+- macOS-App-Bundle bei macOS-Release geprüft wurde
 - keine neuen personenbezogenen Daten in Logs auftauchen
