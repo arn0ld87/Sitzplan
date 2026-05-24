@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -44,13 +44,25 @@ function App() {
     document.documentElement.setAttribute('data-theme', activeTheme);
   }, []);
 
-  // Persist classes whenever they change
+  // Persist classes only after user mutation (skip initial mount to avoid
+  // overwriting existing data when load returned an empty default due to
+  // unsupported schema version or invalid payload).
+  const classesMutatedRef = useRef(false);
   useEffect(() => {
+    if (!classesMutatedRef.current) {
+      classesMutatedRef.current = true;
+      return;
+    }
     saveClasses(classes);
   }, [classes]);
 
-  // Persist layout whenever it changes
+  // Persist layout: same skip-first-mount safeguard.
+  const layoutMutatedRef = useRef(false);
   useEffect(() => {
+    if (!layoutMutatedRef.current) {
+      layoutMutatedRef.current = true;
+      return;
+    }
     saveLayout(layout);
   }, [layout]);
 
