@@ -463,6 +463,14 @@ export const Generator: React.FC<GeneratorProps> = ({
             )}
           </div>
 
+          {/* Hard-Conflict Banner (M2 Slice 1): shown whenever any proposal is invalid */}
+          {proposals.some((p) => !p.valid) && (
+            <div className="hard-conflict-banner" role="alert">
+              <AlertTriangle size={18} />
+              <span>Plan enthält harte Konflikte. Bitte Regeln prüfen.</span>
+            </div>
+          )}
+
           {/* Diagnostic Panel: shown when no valid proposal exists */}
           {proposals.length > 0 && proposals.every((p) => !p.valid) && (() => {
             // Aggregate hard violations across all proposals (de-duplicated by description+studentId).
@@ -743,7 +751,8 @@ export const Generator: React.FC<GeneratorProps> = ({
                         fontSize: '0.95rem',
                         lineHeight: 1.4,
                         marginBottom: '1.25rem',
-                        borderLeft: '4px solid var(--primary)'
+                        borderLeft: '4px solid var(--primary)',
+                        whiteSpace: 'pre-line'
                       }}
                     >
                       {activeProposal.explanation}

@@ -4,9 +4,50 @@ Alle nennenswerten Änderungen am Sitzplaner werden hier dokumentiert.
 
 Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/) und [Semantic Versioning](https://semver.org/lang/de/).
 
-## [Unreleased] – Milestone 1: MVP-Härtung lokal
+## [Unreleased] – Milestone 2: Solver-Qualität & Konfliktanalyse
 
-Branch: `feat/milestone-1`. Stand: 2026-05-25 — alle 7 Slices gemerged, bereit für PR.
+Branch: `feat/milestone-2`. Stand: 2026-05-25 — alle 7 Slices + 3 ADRs gemerged, Performance-Budget < 2 s @ 35/30 als Vitest-Test verankert, bereit für PR.
+
+### Hinzugefügt
+
+- **Hybrid-Solver**: Greedy-Init (Schüler:innen nach Schwierigkeit sortiert) + Simulated Annealing + 6 Random-Restarts pro Profil. Beste Lösung gewinnt. SA-Cooling-Schedule getunt (T 20→0.5, α 0.92, 50 Iter/Temp) — ~5× schneller pro Pass als M1. Siehe ADR 0003.
+- **Seedable RNG** (`src/utils/rng.ts`): Mulberry32-PRNG. `generateSeatingProposals(students, rules, layout, opts?: { seed?: number })` — deterministisch wenn `seed` gegeben, sonst `Math.random`-Fallback (Default für Produktion). Siehe ADR 0005.
+- **Konfliktanalyse** als `SeatingProposal.diagnostics` (statt separater Endpoint, siehe ADR 0004): `unplacedStudents[]`, `bottlenecks[]` (frontRow/doorAccess/window mit `required`/`available`), `contradictoryRules[]` (widersprüchliche Hard-Rules wie `beside`+`not_beside`), optionaler `note`-String. Pre-Check vor dem Solver-Lauf + Post-Analyse nach Restart-Loop.
+- **Schwierigkeitsgewichtung** (`computeStudentDifficulty`, HEURISTIC_PLAN §6): `hardRules*10 + softRules*3 + specialNeeds*6 + relations*4`. Greedy-Init platziert schwierigste Schüler:innen zuerst; SA-Score nutzt difficulty-weighted Penalty (1 + diff/50) für die SA-Entscheidung; angezeigter Score bleibt un-gewichtet.
+- **Verständliche DE-Erklärungen pro `SeatingViolation`** mit Schüler-Namen und konkreter Regel (statt technischer Defaults). `proposal.explanation` ist jetzt eine 3-Zeilen-Zusammenfassung "Ziel / Erreicht / Offen".
+- **Hard-Conflict-Banner** im Generator: zeigt "Plan enthält harte Konflikte. Bitte Regeln prüfen." sobald irgendein Vorschlag `valid:false` ist. Token-treues CSS (`var(--danger)`/`var(--danger-light)`).
+- **Diagnose-Panel** im Generator: rendert `diagnostics.bottlenecks`, `diagnostics.contradictoryRules`, nicht platzierte Schüler:innen und `diagnostics.note`. Vollständig token-getrieben (`var(--orange)`/`var(--surface-2)`).
+- **Dedup-Strategie für Top-3**: alle Restart-Kandidaten (18 = 3 Presets × 6 Restarts) gehen in die Auswahl ein. `selectTop3Distinct` (intern `selectTop3DistinctRaw` auf Lightweight-Records) wählt die 3 strukturell unterschiedlichsten via Hamming-Distanz ≥ 30 % der Schüler:innen. Soft-Reduktion (0.30 → 0.25 → … → 0.0) wenn nicht genug verschiedene Kandidaten; Hinweis in `diagnostics.note`.
+- **Performance-Budget-Test**: `generateSeatingProposals` auf `M2_LARGE_STUDENTS`/`M2_LARGE_RULES`/`M2_LARGE_LAYOUT` (35 Schüler:innen, 30 Regeln) muss < 2000 ms abschließen. Aktuell ~800 ms median.
+- **Test-Fixtures** `src/test/fixtures/m2-large-class.ts` (35 Schüler:innen, 6×6 Pultraster, mixed Special Needs) und `m2-conflict.ts` (8 Schüler:innen mit Sehschwäche auf 2 Front-Plätzen, widersprüchliches Regelpaar).
+- **Tests**: Determinismus auf Large, Dedup-30%-Schwelle auf Large, Sonderbedarfs-Platzierungen (Hörschwäche → vorne, Barrierefreiheit → Tür, Konzentration → fensterarm), Bottleneck-Diagnose, `computeStudentDifficulty`-Mathe, `mulberry32`-Determinismus, Slice-1-Trifecta („alle 3 Profile invalid bei unlösbarem Setup"). Insgesamt 95 Tests in 7 Files.
+- **ADR 0003** (`docs/adr/0003-hybrid-solver-greedy-plus-sa.md`), **ADR 0004** (`docs/adr/0004-diagnostics-in-seating-proposal.md`), **ADR 0005** (`docs/adr/0005-deterministic-solver-via-optional-seed.md`).
+- **Slash-Commands** `/m2-status` (Slice-Tabelle + Quality-Gates-Snapshot) und `/finish-m2` (Integrations-Checklist + PR-Body-Template).
+
+### Geändert
+
+- `generateSeatingProposals` baut volle `SeatingProposal`-Objekte (inkl. `analyzeSeatingDiagnostics`) nur noch für die 3 ausgewählten Finalisten statt für alle 18 Kandidaten. ~4× schneller auf 35/30.
+- `evaluateSeating` nutzt für SA-Entscheidung einen difficulty-weighted Score; öffentlich sichtbarer Score bleibt un-gewichtet.
+- Vitest-Test-Discovery auf `src/**/*.{test,spec}.{ts,tsx}` beschränkt — schließt verschachtelte Worktrees (`.claude/worktrees/*/src`) aus, sonst liefen Tests aus parallelen Slice-Worktrees doppelt mit.
+- `eslint.config.js` ignoriert `.claude/` (verhindert false-positives aus Slice-Worktrees).
+
+### Behoben
+
+- Solver markiert Vorschläge mit verbleibenden Hard-Violations zuverlässig als `valid:false`, auch wenn alle 3 Profile fehlschlagen.
+- UI zeigt prominenten Warnhinweis statt stiller `valid:false` (Lehrkräfte sahen vorher ungültige Pläne ohne Indiz).
+
+### Bekannte offene Punkte (out of scope für M2, → M3+)
+
+- KI-Chat-Befehle für Konfliktauflösung (z. B. "Wenn ich Anna nach hinten setze, was passiert?").
+- Drag-&-Drop-Override im Generator mit anschließender Re-Validierung.
+- Persistente Solver-Konfiguration (Gewichte als User-Settings).
+- Mehrsprachige UI.
+
+---
+
+## [Released] – Milestone 1: MVP-Härtung lokal
+
+Branch: `feat/milestone-1` (gemergt nach `main` am 2026-05-25 als Commit `6cea200`).
 
 ### Hinzugefügt
 

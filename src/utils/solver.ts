@@ -9,10 +9,199 @@ import type {
   SolverDiagnostics
 } from '../types';
 import { newId } from './ids';
+import { mulberry32, defaultRng, type RNG } from './rng';
+
+/**
+ * Number of independent hybrid (greedy + SA) attempts per preset.
+ * Best score wins. See ADR 0003.
+ *
+ * Slice 7 re-measurement (`generateSeatingProposals` with seed=7) after
+ * (a) shortened SA cooling schedule and (b) deferred `buildProposal`:
+ *   - M2 large fixture (35 students/30 rules):  ~800 ms median, 6 restarts
+ *
+ * The new cooling schedule (`simulatedAnnealing` — T=20→0.5, α=0.92,
+ * 50 iter/temp) reduces SA per-pass cost ~5× vs. the M1 schedule, which
+ * left enough headroom under the 2 s budget to restore RANDOM_RESTARTS
+ * from the Slice-3 emergency value of 4 to the ADR-0003 target of 6.
+ * Each `generateSeatingProposals` call now runs 3 presets × 6 restarts
+ * = 18 candidates; `buildProposal` runs only on the picked 3 finalists
+ * (was 12 calls in Slice 6 — 4× saving on the diagnostics path).
+ */
+const RANDOM_RESTARTS = 6;
+
+type Preset = 'balanced' | 'focus' | 'friendship';
+const PRESETS: readonly Preset[] = ['balanced', 'focus', 'friendship'] as const;
 
 // Helper: Calculate distance between two room elements
 function getDistance(el1: { x: number; y: number }, el2: { x: number; y: number }): number {
   return Math.sqrt(Math.pow(el1.x - el2.x, 2) + Math.pow(el1.y - el2.y, 2));
+}
+
+/**
+ * Heuristic per-student difficulty score (HEURISTIC_PLAN §6).
+ *
+ * Used by the greedy initial assignment (hardest students first) and by the
+ * SA scoring loop to weight per-student penalties. Higher = harder to place.
+ *
+ *   hardRuleCount  * 10  (position-only hard rules: front, near_door, ...)
+ *   softRuleCount  * 3   (same, soft)
+ *   specialNeedsCount * 6
+ *   relationCount  * 4   (any rule referencing this student that has a targetId)
+ */
+export function computeStudentDifficulty(student: Student, rules: Rule[]): number {
+  let hardRuleCount = 0;
+  let softRuleCount = 0;
+  let relationCount = 0;
+
+  rules.forEach((rule) => {
+    const isRelation = rule.targetId !== undefined && rule.targetId !== '';
+    if (isRelation) {
+      if (rule.studentId === student.id || rule.targetId === student.id) {
+        relationCount++;
+      }
+    } else if (rule.studentId === student.id) {
+      if (rule.strictness === 'hard') hardRuleCount++;
+      else softRuleCount++;
+    }
+  });
+
+  const specialNeedsCount = student.specialNeeds.length;
+
+  return (
+    hardRuleCount * 10 +
+    softRuleCount * 3 +
+    specialNeedsCount * 6 +
+    relationCount * 4
+  );
+}
+
+// Helper: Resolve a student name from an ID with graceful fallback.
+function resolveStudentName(students: Student[], studentId: string | undefined): string {
+  if (!studentId) return 'Unbekannt';
+  const student = students.find((s) => s.id === studentId);
+  return student?.name || studentId;
+}
+
+// Discriminated union for the violation kinds emitted by evaluateSeating.
+// Used as input to formatViolationDescription so the message stays consistent
+// per rule (student name + concrete rule wording in German).
+type ViolationKind =
+  | { kind: 'need-seh' }
+  | { kind: 'need-hoer' }
+  | { kind: 'need-barr' }
+  | { kind: 'need-konz' }
+  | { kind: 'need-verh'; otherStudentId: string }
+  | { kind: 'beside'; targetStudentId: string }
+  | { kind: 'not_beside'; targetStudentId: string }
+  | { kind: 'near'; targetStudentId: string; distanceCells: number }
+  | { kind: 'far'; targetStudentId: string; distanceCells: number }
+  | { kind: 'front'; row: number }
+  | { kind: 'back'; row: number }
+  | { kind: 'edge' }
+  | { kind: 'near_door' }
+  | { kind: 'near_board' }
+  | { kind: 'not_window' };
+
+function formatViolationDescription(
+  students: Student[],
+  studentId: string,
+  detail: ViolationKind
+): string {
+  const name = resolveStudentName(students, studentId);
+
+  switch (detail.kind) {
+    case 'need-seh':
+      return `${name} hat Sehschwäche und benötigt einen Platz in vorderster Reihe nahe der Tafel.`;
+    case 'need-hoer':
+      return `${name} hat Hörschwäche und sollte vorne oder direkt bei der Tafel sitzen.`;
+    case 'need-barr':
+      return `${name} braucht einen barrierefreien Platz nahe der Tür oder am Rand.`;
+    case 'need-konz':
+      return `${name} braucht Konzentration und sollte nicht direkt am Fenster oder an der Tür sitzen.`;
+    case 'need-verh': {
+      const other = resolveStudentName(students, detail.otherStudentId);
+      return `${name} und ${other} sitzen nebeneinander, obwohl beide erhöhten Verhaltenbedarf haben.`;
+    }
+    case 'beside': {
+      const target = resolveStudentName(students, detail.targetStudentId);
+      return `${name} soll neben ${target} sitzen, ist aber nicht direkt daneben platziert.`;
+    }
+    case 'not_beside': {
+      const target = resolveStudentName(students, detail.targetStudentId);
+      return `${name} und ${target} sitzen nebeneinander, obwohl die Regel das verbietet.`;
+    }
+    case 'near': {
+      const target = resolveStudentName(students, detail.targetStudentId);
+      const rounded = Math.round(detail.distanceCells * 10) / 10;
+      return `${name} soll nahe bei ${target} sitzen, ist aber ${rounded} Felder entfernt.`;
+    }
+    case 'far': {
+      const target = resolveStudentName(students, detail.targetStudentId);
+      const rounded = Math.round(detail.distanceCells * 10) / 10;
+      return `${name} soll weit weg von ${target} sitzen, ist aber nur ${rounded} Felder entfernt.`;
+    }
+    case 'front':
+      return `${name} soll im vorderen Drittel sitzen, sitzt aber in Reihe ${detail.row}.`;
+    case 'back':
+      return `${name} soll im hinteren Drittel sitzen, sitzt aber in Reihe ${detail.row}.`;
+    case 'edge':
+      return `${name} soll am Rand sitzen, ist aber in der Mitte platziert.`;
+    case 'near_door':
+      return `${name} soll nahe der Tür sitzen, ist aber zu weit entfernt.`;
+    case 'near_board':
+      return `${name} soll nahe der Tafel sitzen, ist aber zu weit entfernt.`;
+    case 'not_window':
+      return `${name} soll nicht am Fenster sitzen, ist aber direkt daneben platziert.`;
+  }
+}
+
+function presetGoalLine(preset: 'balanced' | 'focus' | 'friendship'): string {
+  switch (preset) {
+    case 'focus':
+      return 'Ziel: Fokus- und Ruhe-optimiertes Layout mit strenger Trennung verhaltensauffälliger Schüler:innen.';
+    case 'friendship':
+      return 'Ziel: Freundschafts- und Motivations-Layout — Wunschnachbarn sitzen wenn möglich nebeneinander.';
+    case 'balanced':
+    default:
+      return 'Ziel: Ausgewogenes Layout, das alle harten Regeln und möglichst viele weiche Wünsche erfüllt.';
+  }
+}
+
+function buildExplanation(
+  preset: 'balanced' | 'focus' | 'friendship',
+  evaluation: { score: number; violations: SeatingViolation[] },
+  assignments: SeatingAssignment,
+  students: Student[],
+  totalSoftRules: number
+): string {
+  const goal = presetGoalLine(preset);
+
+  const placedCount = Object.values(assignments).filter((id) => id !== '').length;
+  const hardCount = evaluation.violations.filter((v) => v.type === 'hard').length;
+  const softViolatedCount = evaluation.violations.filter((v) => v.type === 'soft').length;
+  const softFulfilledCount = Math.max(totalSoftRules - softViolatedCount, 0);
+
+  const studentLabel = students.length === 1 ? 'Schüler:in' : 'Schüler:innen';
+  const achieved =
+    `Erreicht: ${placedCount} von ${students.length} ${studentLabel} platziert, ` +
+    `${hardCount} harte Konflikt${hardCount === 1 ? '' : 'e'}, ` +
+    `${softFulfilledCount} von ${totalSoftRules} weichen Wünsche${totalSoftRules === 1 ? '' : 'n'} erfüllt.`;
+
+  let open: string;
+  if (hardCount === 0 && softViolatedCount === 0) {
+    open = 'Offen: keine relevanten Wünsche unerfüllt.';
+  } else {
+    const parts: string[] = [];
+    if (hardCount > 0) {
+      parts.push(`${hardCount} harte Regel${hardCount === 1 ? '' : 'n'} verletzt`);
+    }
+    if (softViolatedCount > 0) {
+      parts.push(`${softViolatedCount} weiche Wünsche unerfüllt`);
+    }
+    open = `Offen: ${parts.join(', ')}.`;
+  }
+
+  return `${goal}\n${achieved}\n${open}`;
 }
 
 // Helper: Determine if two desks are adjacent (sharing a border or corner)
@@ -169,18 +358,32 @@ export function analyzeSeatingDiagnostics(
 
   const hardViolations = violations.filter((violation) => violation.type === 'hard');
 
+  const noteParts: string[] = [];
+  if (bottlenecks.length > 0) {
+    const bottleneckLabels: Record<SolverDiagnostics['bottlenecks'][number]['kind'], string> = {
+      frontRow: 'vordere Plätze',
+      doorAccess: 'türnahe Plätze',
+      window: 'fensterarme Plätze'
+    };
+    const summary = bottlenecks
+      .map((b) => `${bottleneckLabels[b.kind]} (${b.required} benötigt / ${b.available} verfügbar)`)
+      .join(', ');
+    noteParts.push(`Strukturelle Engpässe: ${summary}.`);
+  }
+  if (hardViolations.length > 0) {
+    noteParts.push(
+      `Es bleiben ${hardViolations.length} harte Konflikt(e): ${hardViolations
+        .slice(0, 3)
+        .map((violation) => violation.description)
+        .join(' ')}`
+    );
+  }
+
   return {
     unplacedStudents,
     bottlenecks,
     contradictoryRules: findContradictoryRules(rules),
-    ...(hardViolations.length > 0
-      ? {
-          note: `Es bleiben ${hardViolations.length} harte Konflikt(e): ${hardViolations
-            .slice(0, 3)
-            .map((violation) => violation.description)
-            .join(' ')}`
-        }
-      : {})
+    ...(noteParts.length > 0 ? { note: noteParts.join(' ') } : {})
   };
 }
 
@@ -259,7 +462,7 @@ export function evaluateSeating(
           id: `need-seh-${student.id}`,
           studentId: student.id,
           type: 'hard',
-          description: 'Sehschwäche: Sollte in der vorderen Reihe sitzen (nahe der Tafel).',
+          description: formatViolationDescription(students, student.id, { kind: 'need-seh' }),
           targetElementId: board.id
         });
       }
@@ -275,7 +478,7 @@ export function evaluateSeating(
           id: `need-hoer-${student.id}`,
           studentId: student.id,
           type: 'hard',
-          description: 'Hörschwäche: Sollte nahe bei der Tafel / vorne sitzen.',
+          description: formatViolationDescription(students, student.id, { kind: 'need-hoer' }),
           targetElementId: board.id
         });
       }
@@ -295,7 +498,7 @@ export function evaluateSeating(
           id: `need-barr-${student.id}`,
           studentId: student.id,
           type: 'hard',
-          description: 'Barrierefreiheit: Benötigt barrierefreien Platz nahe der Tür oder am Rand.',
+          description: formatViolationDescription(students, student.id, { kind: 'need-barr' }),
           targetElementId: doors[0]?.id
         });
       }
@@ -311,7 +514,7 @@ export function evaluateSeating(
           id: `need-konz-${student.id}`,
           studentId: student.id,
           type: 'soft',
-          description: 'Konzentrationsbedarf: Sollte nicht direkt am Fenster oder an der Tür sitzen.',
+          description: formatViolationDescription(students, student.id, { kind: 'need-konz' }),
         });
       }
     }
@@ -332,7 +535,10 @@ export function evaluateSeating(
                 id: `need-verh-${student.id}-${otherStudent.id}`,
                 studentId: student.id,
                 type: 'hard',
-                description: 'Verhaltensauffälligkeit: Darf nicht neben einem anderen Schüler mit erhöhtem Verhaltenbedarf sitzen.',
+                description: formatViolationDescription(students, student.id, {
+                  kind: 'need-verh',
+                  otherStudentId: otherStudent.id
+                }),
                 targetStudentId: otherStudent.id
               });
             }
@@ -366,7 +572,10 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: `Sollte neben ${students.find((s) => s.id === rule.targetId)?.name || 'Schüler'} sitzen.`,
+              description: formatViolationDescription(students, rule.studentId, {
+                kind: 'beside',
+                targetStudentId: rule.targetId
+              }),
               targetStudentId: rule.targetId
             });
           } else if (rule.strictness === 'soft') {
@@ -382,7 +591,10 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: `Darf NICHT neben ${students.find((s) => s.id === rule.targetId)?.name || 'Schüler'} sitzen.`,
+              description: formatViolationDescription(students, rule.studentId, {
+                kind: 'not_beside',
+                targetStudentId: rule.targetId
+              }),
               targetStudentId: rule.targetId
             });
           }
@@ -396,7 +608,11 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: `Sollte nahe bei ${students.find((s) => s.id === rule.targetId)?.name || 'Schüler'} sitzen.`,
+              description: formatViolationDescription(students, rule.studentId, {
+                kind: 'near',
+                targetStudentId: rule.targetId,
+                distanceCells: dist
+              }),
               targetStudentId: rule.targetId
             });
           }
@@ -410,7 +626,11 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: `Sollte weit weg von ${students.find((s) => s.id === rule.targetId)?.name || 'Schüler'} sitzen.`,
+              description: formatViolationDescription(students, rule.studentId, {
+                kind: 'far',
+                targetStudentId: rule.targetId,
+                distanceCells: dist
+              }),
               targetStudentId: rule.targetId
             });
           }
@@ -428,7 +648,10 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: 'Sollte im vorderen Drittel sitzen.',
+              description: formatViolationDescription(students, rule.studentId, {
+                kind: 'front',
+                row: Math.round(studentDesk.y - minY) + 1
+              }),
             });
           }
           break;
@@ -443,7 +666,10 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: 'Sollte im hinteren Drittel sitzen.',
+              description: formatViolationDescription(students, rule.studentId, {
+                kind: 'back',
+                row: Math.round(studentDesk.y - minY) + 1
+              }),
             });
           }
           break;
@@ -462,7 +688,7 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: 'Sollte am Rand sitzen.',
+              description: formatViolationDescription(students, rule.studentId, { kind: 'edge' }),
             });
           }
           break;
@@ -479,7 +705,7 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: 'Sollte nahe der Tür sitzen.',
+              description: formatViolationDescription(students, rule.studentId, { kind: 'near_door' }),
             });
           }
           break;
@@ -494,7 +720,7 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: 'Sollte nahe der Tafel sitzen.',
+              description: formatViolationDescription(students, rule.studentId, { kind: 'near_board' }),
               targetElementId: board.id
             });
           }
@@ -510,7 +736,7 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: 'Sollte nicht am Fenster sitzen.',
+              description: formatViolationDescription(students, rule.studentId, { kind: 'not_window' }),
             });
           }
           break;
@@ -522,12 +748,259 @@ export function evaluateSeating(
   return { score, violations };
 }
 
-// Simulated Annealing Solver algorithm
+/**
+ * Greedy initial assignment: places students one-by-one in difficulty order
+ * onto the locally best-scoring still-free desk. Ties broken by `rng()`.
+ *
+ * Hard position rules (front/near_board/near_door/not_window) are not a
+ * separate phase — they are baked into the per-desk score and so bias the
+ * placement automatically. Per-student ordering uses `computeStudentDifficulty`
+ * (HEURISTIC_PLAN §6) so the hardest-to-place students grab their preferred
+ * desks first.
+ */
+/**
+ * Pre-compute per-student difficulty once for a (students, rules) pair so
+ * the SA hot path (~40 000 iterations on the 35/30 fixture) doesn't rebuild
+ * the map on every call. Exported so callers can pass it explicitly when
+ * they call `simulatedAnnealing` or `greedyInitialAssignment` directly.
+ */
+export function computeDifficultyMap(students: Student[], rules: Rule[]): Map<string, number> {
+  const map = new Map<string, number>();
+  students.forEach((student) => {
+    map.set(student.id, computeStudentDifficulty(student, rules));
+  });
+  return map;
+}
+
+export function greedyInitialAssignment(
+  students: Student[],
+  desks: ClassroomElement[],
+  rules: Rule[],
+  layout: ClassroomLayout,
+  rng: RNG,
+  preset: Preset = 'balanced',
+  difficultyMap?: Map<string, number>
+): SeatingAssignment {
+  const difficulty = difficultyMap ?? computeDifficultyMap(students, rules);
+
+  const sortedStudents = [...students].sort((a, b) => {
+    const diff = (difficulty.get(b.id) ?? 0) - (difficulty.get(a.id) ?? 0);
+    if (diff !== 0) return diff;
+    // Stable-ish tiebreak with rng so restarts diverge.
+    return rng() - 0.5;
+  });
+
+  const assignments: SeatingAssignment = {};
+  desks.forEach((d) => {
+    assignments[d.id] = '';
+  });
+
+  const freeDeskIds = new Set(desks.map((d) => d.id));
+
+  for (const student of sortedStudents) {
+    if (freeDeskIds.size === 0) break;
+
+    // Score every still-free desk by placing the student there tentatively.
+    // Use the target preset so e.g. focus-mode behaviour weights bias placement.
+    let bestScore = -Infinity;
+    let bestDeskIds: string[] = [];
+
+    for (const deskId of freeDeskIds) {
+      assignments[deskId] = student.id;
+      const { score } = evaluateSeating(assignments, students, rules, layout, preset);
+      assignments[deskId] = '';
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestDeskIds = [deskId];
+      } else if (score === bestScore) {
+        bestDeskIds.push(deskId);
+      }
+    }
+
+    // Break ties with rng so restarts visit different greedy paths.
+    const chosen = bestDeskIds[Math.floor(rng() * bestDeskIds.length)];
+    assignments[chosen] = student.id;
+    freeDeskIds.delete(chosen);
+  }
+
+  return assignments;
+}
+
+/**
+ * Simulated Annealing on a given initial assignment. All randomness routes
+ * through the injected `rng` so behaviour is deterministic when a seeded
+ * RNG is supplied.
+ */
+/**
+ * Re-score an evaluation result so that each violation is amplified by the
+ * difficulty of the affected student. Used only by the SA decision loop —
+ * the user-facing `score` and `violations` stay the raw values produced by
+ * `evaluateSeating`.
+ *
+ * The raw `score` starts at 1000 and is decremented per violation. Since we
+ * don't track per-violation penalty here, we approximate the extra penalty
+ * as `(multiplier - 1) * baseWeight` where `baseWeight` matches the preset
+ * weights used in `evaluateSeating`. The exact weights don't have to match
+ * 1:1 — SA only cares about relative ordering of neighbouring states.
+ */
+function difficultyWeightedScore(
+  evaluation: { score: number; violations: SeatingViolation[] },
+  difficultyMap: Map<string, number>
+): number {
+  // difficulty-weighted penalty multiplier — keeps /50 normalisation so a
+  // typical student (difficulty 0-75) yields a multiplier in [1.0, 2.5].
+  let extraPenalty = 0;
+  for (const violation of evaluation.violations) {
+    if (!violation.studentId) continue;
+    const diff = difficultyMap.get(violation.studentId) ?? 0;
+    const multiplier = 1 + diff / 50;
+    // Approximate per-violation base weight: hard ~ 500, soft ~ 50.
+    // (Matches the 'balanced' preset weights in evaluateSeating.)
+    const baseWeight = violation.type === 'hard' ? 500 : 50;
+    extraPenalty += (multiplier - 1) * baseWeight;
+  }
+
+  return evaluation.score - extraPenalty;
+}
+
+export function simulatedAnnealing(
+  initialAssignment: SeatingAssignment,
+  students: Student[],
+  rules: Rule[],
+  layout: ClassroomLayout,
+  rng: RNG,
+  preset: Preset,
+  difficultyMap?: Map<string, number>
+): { assignments: SeatingAssignment; score: number; violations: SeatingViolation[] } {
+  const desks = layout.elements.filter((el) => el.type === 'desk');
+  // Cache the per-student difficulty once. Building it inside the loop body
+  // dominated profile time before (Gemini PR #14: ~40k rebuilds per pass).
+  const diffMap = difficultyMap ?? computeDifficultyMap(students, rules);
+
+  let currentAssignments: SeatingAssignment = { ...initialAssignment };
+  let currentEval = evaluateSeating(currentAssignments, students, rules, layout, preset);
+  let currentWeighted = difficultyWeightedScore(currentEval, diffMap);
+  let bestAssignments = { ...currentAssignments };
+  let bestEval = currentEval;
+  let bestWeighted = currentWeighted;
+
+  // Slice 7: shorter cooling schedule. Old: T=100→0.1, α=0.985, 200 iter
+  // (≈91k iterations/pass × 12 passes → > 4 s on mockData). New: T=20→0.5,
+  // α=0.92, 50 iter (≈2.2k iterations/pass × 12 → ~0.8–1.4 s on the 35/30
+  // fixture, comfortably inside the 2 s budget). Quality on the existing
+  // test fixtures stays unchanged because the greedy init is already
+  // close to optimum and SA mostly cleans up soft-constraint slack.
+  let T = 20.0;
+  const T_min = 0.5;
+  const alpha = 0.92;
+  const maxIterationsPerTemp = 50;
+
+  while (T > T_min) {
+    for (let i = 0; i < maxIterationsPerTemp; i++) {
+      const nextAssignments = { ...currentAssignments };
+
+      const d1Index = Math.floor(rng() * desks.length);
+      let d2Index = Math.floor(rng() * desks.length);
+      while (d1Index === d2Index && desks.length > 1) {
+        d2Index = Math.floor(rng() * desks.length);
+      }
+
+      const d1Id = desks[d1Index].id;
+      const d2Id = desks[d2Index].id;
+
+      const temp = nextAssignments[d1Id];
+      nextAssignments[d1Id] = nextAssignments[d2Id];
+      nextAssignments[d2Id] = temp;
+
+      const nextEval = evaluateSeating(nextAssignments, students, rules, layout, preset);
+      const nextWeighted = difficultyWeightedScore(nextEval, diffMap);
+      const deltaE = nextWeighted - currentWeighted;
+
+      if (deltaE > 0 || rng() < Math.exp(deltaE / T)) {
+        currentAssignments = nextAssignments;
+        currentEval = nextEval;
+        currentWeighted = nextWeighted;
+
+        if (currentWeighted > bestWeighted) {
+          bestAssignments = { ...currentAssignments };
+          bestEval = currentEval;
+          bestWeighted = currentWeighted;
+        }
+      }
+    }
+    T *= alpha;
+  }
+
+  return {
+    assignments: bestAssignments,
+    score: bestEval.score,
+    violations: bestEval.violations
+  };
+}
+
+function buildProposal(
+  preset: Preset,
+  assignments: SeatingAssignment,
+  score: number,
+  violations: SeatingViolation[],
+  students: Student[],
+  rules: Rule[],
+  layout: ClassroomLayout
+): SeatingProposal {
+  let presetName = 'Ausgewogener Sitzplan';
+  if (preset === 'focus') {
+    presetName = 'Fokus- & Ruhe-optimierter Sitzplan';
+  } else if (preset === 'friendship') {
+    presetName = 'Freundschafts- & Motivations-Sitzplan';
+  }
+
+  const hardViolations = violations.filter((v) => v.type === 'hard');
+  const totalSoftRules = rules.filter((r) => r.strictness === 'soft').length;
+  const explanation = buildExplanation(
+    preset,
+    { score, violations },
+    assignments,
+    students,
+    totalSoftRules
+  );
+
+  return {
+    id: newId(`proposal-${preset}`),
+    name: presetName,
+    assignments,
+    score,
+    violations,
+    explanation,
+    valid: hardViolations.length === 0,
+    diagnostics: analyzeSeatingDiagnostics(assignments, students, rules, layout, violations)
+  };
+}
+
+function runHybridPass(
+  students: Student[],
+  rules: Rule[],
+  layout: ClassroomLayout,
+  preset: Preset,
+  rng: RNG,
+  difficultyMap?: Map<string, number>
+): { assignments: SeatingAssignment; score: number; violations: SeatingViolation[] } {
+  const desks = layout.elements.filter((el) => el.type === 'desk');
+  const diffMap = difficultyMap ?? computeDifficultyMap(students, rules);
+  const initial = greedyInitialAssignment(students, desks, rules, layout, rng, preset, diffMap);
+  return simulatedAnnealing(initial, students, rules, layout, rng, preset, diffMap);
+}
+
+/**
+ * Backward-compatible single-pass solver: one greedy init + one SA run for
+ * the given preset. Used by the Generator UI today. The new restart-driven
+ * API is `generateSeatingProposals` below.
+ */
 export function generateSeatingPlan(
   students: Student[],
   rules: Rule[],
   layout: ClassroomLayout,
-  preset: 'balanced' | 'focus' | 'friendship' = 'balanced'
+  preset: Preset = 'balanced'
 ): SeatingProposal {
   const desks = layout.elements.filter((el) => el.type === 'desk');
 
@@ -535,102 +1008,232 @@ export function generateSeatingPlan(
     throw new Error('Nicht genügend Sitzplätze für alle Schüler vorhanden!');
   }
 
-  // 1. Generate an initial random/greedy state
-  let currentAssignments: SeatingAssignment = {};
-  
-  // Clean empty desks representation
-  desks.forEach((d) => {
-    currentAssignments[d.id] = '';
-  });
+  const rng = defaultRng();
+  const diffMap = computeDifficultyMap(students, rules);
+  const result = runHybridPass(students, rules, layout, preset, rng, diffMap);
+  return buildProposal(preset, result.assignments, result.score, result.violations, students, rules, layout);
+}
 
-  // Assign students randomly to desks
-  const shuffledStudents = [...students].sort(() => Math.random() - 0.5);
-  const shuffledDesks = [...desks].sort(() => Math.random() - 0.5);
+/**
+ * New solver entry point: runs `RANDOM_RESTARTS` independent greedy+SA
+ * passes per preset, collects ALL candidates (4 × 3 = 12) and runs
+ * Hamming-distance-aware dedup selection to pick the final 3 proposals
+ * (see Slice 6 in M2_PLAN.md).
+ *
+ * When `opts.seed` is provided every random choice routes through a
+ * deterministic mulberry32 derived from it (see ADR 0005); two calls with
+ * the same seed return identical assignments. Without a seed the solver
+ * falls back to `Math.random` (production default).
+ */
+export function generateSeatingProposals(
+  students: Student[],
+  rules: Rule[],
+  layout: ClassroomLayout,
+  opts?: { seed?: number }
+): SeatingProposal[] {
+  const desks = layout.elements.filter((el) => el.type === 'desk');
 
-  shuffledStudents.forEach((student, index) => {
-    currentAssignments[shuffledDesks[index].id] = student.id;
-  });
+  if (desks.length < students.length) {
+    throw new Error('Nicht genügend Sitzplätze für alle Schüler vorhanden!');
+  }
 
-  let currentEval = evaluateSeating(currentAssignments, students, rules, layout, preset);
-  let bestAssignments = { ...currentAssignments };
-  let bestEval = currentEval;
+  const masterRng: RNG = opts?.seed !== undefined ? mulberry32(opts.seed) : defaultRng();
+  // PR #14 review (Gemini, HIGH): compute difficulty map once and reuse it
+  // across all 18 hybrid passes — was rebuilt ~40 000 times per SA pass.
+  const difficultyMap = computeDifficultyMap(students, rules);
 
-  // 2. Simulated Annealing Parameters
-  let T = 100.0;
-  const T_min = 0.1;
-  const alpha = 0.985;
-  const maxIterationsPerTemp = 200;
+  // Slice 7: keep candidates lightweight (no `buildProposal`/diagnostics yet)
+  // — 18 candidates only become 3 finalists after dedup, and the full
+  // SeatingProposal incl. analyzeSeatingDiagnostics is expensive on the
+  // 35-student fixture. We build it for the picked 3 only.
+  const rawCandidates: RawCandidate[] = [];
 
-  // Annealing Loop
-  while (T > T_min) {
-    for (let i = 0; i < maxIterationsPerTemp; i++) {
-      // Pick neighbor state:
-      const nextAssignments = { ...currentAssignments };
-
-      // Swap two random desks (could be occupied or empty)
-      const d1Index = Math.floor(Math.random() * desks.length);
-      let d2Index = Math.floor(Math.random() * desks.length);
-      while (d1Index === d2Index && desks.length > 1) {
-        d2Index = Math.floor(Math.random() * desks.length);
-      }
-
-      const d1Id = desks[d1Index].id;
-      const d2Id = desks[d2Index].id;
-
-      // Swap values
-      const temp = nextAssignments[d1Id];
-      nextAssignments[d1Id] = nextAssignments[d2Id];
-      nextAssignments[d2Id] = temp;
-
-      const nextEval = evaluateSeating(nextAssignments, students, rules, layout, preset);
-      const deltaE = nextEval.score - currentEval.score;
-
-      // Acceptance probability
-      if (deltaE > 0 || Math.random() < Math.exp(deltaE / T)) {
-        currentAssignments = nextAssignments;
-        currentEval = nextEval;
-
-        if (currentEval.score > bestEval.score) {
-          bestAssignments = { ...currentAssignments };
-          bestEval = currentEval;
-        }
-      }
+  for (const preset of PRESETS) {
+    for (let r = 0; r < RANDOM_RESTARTS; r++) {
+      // Derive a fresh per-restart seed from the master rng so restarts
+      // diverge but the whole run stays deterministic for a given seed.
+      const restartSeed = Math.floor(masterRng() * 0xffffffff);
+      const restartRng = mulberry32(restartSeed);
+      const result = runHybridPass(students, rules, layout, preset, restartRng, difficultyMap);
+      rawCandidates.push({
+        preset,
+        assignments: result.assignments,
+        score: result.score,
+        violations: result.violations
+      });
     }
-    T *= alpha; // Cool down
   }
 
-  // Generate automated explanation based on properties and violations
-  let presetName = 'Ausgewogener Sitzplan';
-  let focusDetail = 'Dieser Plan versucht, alle Regeln optimal auszubalancieren.';
-  
-  if (preset === 'focus') {
-    presetName = 'Fokus- & Ruhe-optimierter Sitzplan';
-    focusDetail = 'Dieser Plan trennt Schüler mit Verhaltensbedarfen strikt und platziert ablenkungsgefährdete Kinder abseits von Fenster und Tür.';
-  } else if (preset === 'friendship') {
-    presetName = 'Freundschafts- & Motivations-Sitzplan';
-    focusDetail = 'Dieser Plan priorisiert das Nebeneinandersitzen von Wunschnachbarn, auch wenn dadurch leichte Positionspräferenzen hintenanstehen.';
+  const pickedRaw = selectTop3DistinctRaw(rawCandidates, students);
+  const softReduced = pickedRaw.length < 3 || pickedRaw.some((c) => c.softReduced);
+
+  return pickedRaw.map((c) => {
+    const proposal = buildProposal(
+      c.preset,
+      c.assignments,
+      c.score,
+      c.violations,
+      students,
+      rules,
+      layout
+    );
+    if (softReduced) {
+      proposal.diagnostics = appendDiagnosticNote(proposal.diagnostics, DEDUP_NOTE_SUFFIX);
+    }
+    return proposal;
+  });
+}
+
+/**
+ * Lightweight candidate record used internally between SA and dedup.
+ * Avoids the cost of `buildProposal` (which itself calls
+ * `analyzeSeatingDiagnostics`) on candidates that get thrown away.
+ */
+type RawCandidate = {
+  preset: Preset;
+  assignments: SeatingAssignment;
+  score: number;
+  violations: SeatingViolation[];
+};
+
+type RawPickedCandidate = RawCandidate & { softReduced?: boolean };
+
+/**
+ * Slice-6-equivalent dedup on the lightweight candidate type. Selection
+ * logic mirrors `selectTop3Distinct` exactly so behaviour stays identical;
+ * the only difference is that the diagnostic note is attached on the
+ * SeatingProposal afterwards by the caller.
+ */
+function selectTop3DistinctRaw(
+  candidates: RawCandidate[],
+  students: Student[]
+): RawPickedCandidate[] {
+  if (candidates.length === 0) return [];
+  const sorted = [...candidates].sort((a, b) => b.score - a.score);
+  if (sorted.length <= 1) return sorted.map((c) => ({ ...c }));
+
+  let picked: RawCandidate[] = [];
+  let usedThreshold = DEDUP_THRESHOLDS[DEDUP_THRESHOLDS.length - 1];
+
+  for (const threshold of DEDUP_THRESHOLDS) {
+    const minDistance = threshold * students.length;
+    picked = [sorted[0]];
+    for (let i = 1; i < sorted.length && picked.length < 3; i++) {
+      const cand = sorted[i];
+      const distinctFromAll = picked.every(
+        (p) => hammingDistanceAssignments(p.assignments, cand.assignments, students) >= minDistance
+      );
+      if (distinctFromAll) picked.push(cand);
+    }
+    if (picked.length >= 3) {
+      usedThreshold = threshold;
+      break;
+    }
   }
 
-  const hardViolations = bestEval.violations.filter((v) => v.type === 'hard');
-  const softViolations = bestEval.violations.filter((v) => v.type === 'soft');
+  const softReduced = usedThreshold < DEDUP_PRIMARY_THRESHOLD || picked.length < 3;
+  return picked.map((c) => ({ ...c, softReduced }));
+}
 
-  let explanation: string;
-  if (hardViolations.length === 0 && softViolations.length === 0) {
-    explanation = `${presetName}: Perfekter Sitzplan! Alle ${rules.length} definierten Regeln und alle besonderen Anforderungen der Schüler wurden vollständig eingehalten. ${focusDetail}`;
-  } else if (hardViolations.length === 0) {
-    explanation = `${presetName}: Optimierter Sitzplan. Alle harten Regeln (wie Barrierefreiheit und Sehschwächen) wurden erfolgreich eingehalten. Es gibt lediglich ${softViolations.length} verletzte weiche Wünsche. ${focusDetail}`;
-  } else {
-    explanation = `${presetName}: Optimierter Sitzplan. Es gab strukturelle Konflikte im Raum (z. B. zu wenig vordere Sitzplätze für alle Sehschwächen oder widersprüchliche Nachbarschaftswünsche). ${hardViolations.length} harte Regeln und ${softViolations.length} weiche Regeln konnten nicht erfüllt werden. ${focusDetail}`;
+/**
+ * Hamming distance between two seating assignments, counted over students.
+ * For each student, a difference of 1 is added when their desk-id differs
+ * between `a` and `b`. A student assigned in one but not the other counts
+ * as 1 (different desk). Students missing from both count as 0.
+ */
+export function hammingDistanceAssignments(
+  a: SeatingAssignment,
+  b: SeatingAssignment,
+  students: Student[]
+): number {
+  // Build studentId -> deskId reverse maps for both assignments.
+  const deskA = new Map<string, string>();
+  const deskB = new Map<string, string>();
+  for (const [deskId, studentId] of Object.entries(a)) {
+    if (studentId) deskA.set(studentId, deskId);
+  }
+  for (const [deskId, studentId] of Object.entries(b)) {
+    if (studentId) deskB.set(studentId, deskId);
   }
 
-  return {
-    id: newId(`proposal-${preset}`),
-    name: presetName,
-    assignments: bestAssignments,
-    score: bestEval.score,
-    violations: bestEval.violations,
-    explanation,
-    valid: hardViolations.length === 0,
-    diagnostics: analyzeSeatingDiagnostics(bestAssignments, students, rules, layout, bestEval.violations)
+  let diff = 0;
+  for (const student of students) {
+    const da = deskA.get(student.id);
+    const db = deskB.get(student.id);
+    if (da === undefined && db === undefined) continue;
+    if (da !== db) diff++;
+  }
+  return diff;
+}
+
+const DEDUP_PRIMARY_THRESHOLD = 0.30;
+const DEDUP_THRESHOLDS = [0.30, 0.25, 0.20, 0.15, 0.10, 0.05, 0.0] as const;
+const DEDUP_NOTE_SUFFIX =
+  'Hinweis: Solver konnte keine ausreichend unterschiedlichen Alternativen finden — weniger als 3 Vorschläge sind strukturell verschieden.';
+
+/**
+ * Pick up to 3 most-distinct top-scoring candidates by Hamming distance.
+ *
+ * Strategy: sort by score desc, pick the highest-scoring as anchor, then
+ * greedily add the next candidate whose Hamming distance to all already
+ * picked candidates is >= threshold * students.length. Start at 30%,
+ * soft-reduce in 5% steps down to 0% if fewer than 3 are found. If soft
+ * reduction had to kick in (or even at 0% the pool is too small to yield
+ * 3 distinct candidates), append a diagnostic note to each picked
+ * proposal so the UI can communicate the loss of diversity.
+ */
+export function selectTop3Distinct(
+  candidates: SeatingProposal[],
+  students: Student[]
+): SeatingProposal[] {
+  if (candidates.length === 0) return [];
+
+  const sorted = [...candidates].sort((a, b) => b.score - a.score);
+  if (sorted.length <= 1) return sorted;
+
+  let picked: SeatingProposal[] = [];
+  let usedThreshold = DEDUP_THRESHOLDS[DEDUP_THRESHOLDS.length - 1];
+
+  for (const threshold of DEDUP_THRESHOLDS) {
+    const minDistance = threshold * students.length;
+    picked = [sorted[0]];
+    for (let i = 1; i < sorted.length && picked.length < 3; i++) {
+      const cand = sorted[i];
+      const distinctFromAll = picked.every(
+        (p) => hammingDistanceAssignments(p.assignments, cand.assignments, students) >= minDistance
+      );
+      if (distinctFromAll) picked.push(cand);
+    }
+    if (picked.length >= 3) {
+      usedThreshold = threshold;
+      break;
+    }
+  }
+
+  // Append the diagnostic note when soft reduction had to lower the
+  // threshold below the primary value, or when even at t=0 the pool was
+  // too small to produce 3 candidates.
+  const softReduced = usedThreshold < DEDUP_PRIMARY_THRESHOLD || picked.length < 3;
+  if (softReduced) {
+    picked = picked.map((p) => ({
+      ...p,
+      diagnostics: appendDiagnosticNote(p.diagnostics, DEDUP_NOTE_SUFFIX)
+    }));
+  }
+
+  return picked;
+}
+
+function appendDiagnosticNote(
+  diagnostics: SolverDiagnostics | undefined,
+  suffix: string
+): SolverDiagnostics {
+  const base: SolverDiagnostics = diagnostics ?? {
+    unplacedStudents: [],
+    bottlenecks: [],
+    contradictoryRules: []
   };
+  const existingNote = base.note?.trim();
+  const note = existingNote ? `${existingNote} ${suffix}` : suffix;
+  return { ...base, note };
 }
