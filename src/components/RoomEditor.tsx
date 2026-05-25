@@ -4,15 +4,19 @@ import {
   Trash2,
   Maximize2,
   Grid,
-  Compass
+  Compass,
+  Users,
+  AlertTriangle
 } from 'lucide-react';
 import type { ClassroomElement, ClassroomLayout, ElementType } from '../types';
 import { MOCK_CLASSROOM_LAYOUT } from '../utils/mockData';
 import { newId } from '../utils/ids';
+import { countDesks } from '../utils/layoutCapacity';
 
 interface RoomEditorProps {
   layout: ClassroomLayout;
   onUpdateLayout: (layout: ClassroomLayout) => void;
+  studentCount?: number;
 }
 
 const ELEMENT_CATALOG: { type: ElementType; label: string; w: number; h: number; color: string }[] = [
@@ -26,8 +30,12 @@ const ELEMENT_CATALOG: { type: ElementType; label: string; w: number; h: number;
 
 export const RoomEditor: React.FC<RoomEditorProps> = ({
   layout,
-  onUpdateLayout
+  onUpdateLayout,
+  studentCount = 0
 }) => {
+  const deskCount = countDesks(layout);
+  const overCapacity = studentCount > deskCount;
+  const deficit = overCapacity ? studentCount - deskCount : 0;
   const [selectedTool, setSelectedTool] = useState<ElementType | 'select'>('select');
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   
@@ -292,6 +300,31 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
               </button>
             </div>
           </div>
+
+          <div
+            className={`room-capacity-stats ${overCapacity ? 'is-over' : ''}`}
+            role="status"
+            aria-live="polite"
+          >
+            <span className="room-capacity-stat">
+              <Grid size={14} aria-hidden="true" />
+              <strong>{deskCount}</strong> {deskCount === 1 ? 'Sitzplatz' : 'Sitzplätze'}
+            </span>
+            <span className="room-capacity-stat">
+              <Users size={14} aria-hidden="true" />
+              <strong>{studentCount}</strong> {studentCount === 1 ? 'Schüler:in' : 'Schüler:innen'}
+            </span>
+          </div>
+
+          {overCapacity && (
+            <div className="room-capacity-warning" role="alert">
+              <AlertTriangle size={18} aria-hidden="true" />
+              <span>
+                Zu wenige Sitzplätze: <strong>{deficit}</strong> {deficit === 1 ? 'Schüler:in hat' : 'Schüler:innen haben'} keinen Platz.
+                Füge weitere Schülerpulte hinzu oder reduziere die Klassengröße.
+              </span>
+            </div>
+          )}
 
           <div className="grid-viewport">
             <svg

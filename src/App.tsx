@@ -454,6 +454,7 @@ function App() {
           <RoomEditor
             layout={layout}
             onUpdateLayout={handleUpdateLayout}
+            studentCount={activeClass?.students.length ?? 0}
           />
         )}
 

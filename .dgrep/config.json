@@ -1,0 +1,34 @@
+{
+  "libraries": [
+    {
+      "identifier": "jsdom",
+      "packages": [
+        "jsdom"
+      ]
+    },
+    {
+      "identifier": "lucide-react",
+      "packages": [
+        "lucide-react"
+      ]
+    },
+    {
+      "identifier": "react",
+      "packages": [
+        "react"
+      ]
+    },
+    {
+      "identifier": "react-dom",
+      "packages": [
+        "react-dom"
+      ]
+    },
+    {
+      "identifier": "typescript-eslint",
+      "packages": [
+        "typescript-eslint"
+      ]
+    }
+  ]
+}
