@@ -1,4 +1,5 @@
 import type { SchoolClass, ClassroomLayout } from '../types';
+import { validateSchoolClass, validateLayout } from './validation';
 
 export const STORAGE_KEYS = {
   classes: 'sitzplaner_classes',
@@ -85,61 +86,69 @@ function writeEnvelope<T>(key: string, data: T): void {
   localStorage.setItem(key, JSON.stringify(envelope));
 }
 
-// ─── Class validation ──────────────────────────────────────────────────────
+// ─── Class load / save ─────────────────────────────────────────────────────
 
+/**
+ * Type-guard adapter around the deep validators in validation.ts. Promotes
+ * structural validation in storage to the same rigor as import validation.
+ */
 function isSchoolClassArray(value: unknown): value is SchoolClass[] {
   if (!Array.isArray(value)) return false;
-  return value.every(
-    (item) =>
-      typeof item === 'object' &&
-      item !== null &&
-      typeof (item as SchoolClass).id === 'string' &&
-      typeof (item as SchoolClass).name === 'string' &&
-      Array.isArray((item as SchoolClass).students) &&
-      Array.isArray((item as SchoolClass).rules)
-  );
+  return value.every((cls, i) => validateSchoolClass(cls, `classes[${i}]`).length === 0);
 }
 
-export function loadClasses(): SchoolClass[] {
+export interface LoadResult<T> {
+  data: T;
+  /**
+   * 'ok'                    — payload loaded successfully (legacy or v1).
+   * 'empty'                 — nothing in storage; safe to write fresh data.
+   * 'unsupported-version'   — payload schemaVersion > CURRENT. Future-version
+   *                           data is in storage; the caller MUST enter a
+   *                           read-only mode and skip saves to avoid
+   *                           overwriting the future-version payload.
+   * 'invalid-data'          — JSON parsed but failed structural validation.
+   *                           Saving is allowed and will replace the broken
+   *                           payload with a clean current-version one.
+   * 'parse-error'           — could not JSON.parse. Same handling as
+   *                           'invalid-data'.
+   */
+  status: 'ok' | 'empty' | 'unsupported-version' | 'invalid-data' | 'parse-error';
+}
+
+export function loadClasses(): LoadResult<SchoolClass[]> {
   const raw = localStorage.getItem(STORAGE_KEYS.classes);
   const result = parseEnvelope<SchoolClass[]>(raw, isSchoolClassArray);
-  if (result.ok) return result.data;
+  if (result.ok) return { data: result.data, status: 'ok' };
 
   if (result.reason === 'parse-error' || result.reason === 'invalid-data') {
     console.error(
       `[storage] Klassen konnten nicht geladen werden (${result.reason}). Starte mit leerer Liste, vorhandene Daten bleiben unangetastet.`
     );
   }
-  return [];
+  return { data: [], status: result.reason };
 }
 
 export function saveClasses(classes: SchoolClass[]): void {
   writeEnvelope(STORAGE_KEYS.classes, classes);
 }
 
-// ─── Layout validation ─────────────────────────────────────────────────────
+// ─── Layout load / save ────────────────────────────────────────────────────
 
 function isClassroomLayout(value: unknown): value is ClassroomLayout {
-  if (typeof value !== 'object' || value === null) return false;
-  const layout = value as ClassroomLayout;
-  return (
-    typeof layout.width === 'number' &&
-    typeof layout.height === 'number' &&
-    Array.isArray(layout.elements)
-  );
+  return validateLayout(value, 'layout').length === 0;
 }
 
-export function loadLayout(): ClassroomLayout | null {
+export function loadLayout(): LoadResult<ClassroomLayout | null> {
   const raw = localStorage.getItem(STORAGE_KEYS.layout);
   const result = parseEnvelope<ClassroomLayout>(raw, isClassroomLayout);
-  if (result.ok) return result.data;
+  if (result.ok) return { data: result.data, status: 'ok' };
 
   if (result.reason === 'parse-error' || result.reason === 'invalid-data') {
     console.error(
       `[storage] Grundriss konnte nicht geladen werden (${result.reason}). Starte mit Default, vorhandene Daten bleiben unangetastet.`
     );
   }
-  return null;
+  return { data: null, status: result.reason };
 }
 
 export function saveLayout(layout: ClassroomLayout): void {

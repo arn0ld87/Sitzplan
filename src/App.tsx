@@ -26,13 +26,27 @@ const DEFAULT_LAYOUT: ClassroomLayout = {
   elements: []
 };
 
+// Single initial-load snapshot. Hoisted out of the component so the I/O
+// happens exactly once per module evaluation, instead of N times across
+// useState initializers.
+const INITIAL_CLASSES = loadClasses();
+const INITIAL_LAYOUT = loadLayout();
+
+// If either side has a future schema version, the app must NOT write back —
+// otherwise mutation would overwrite the future-version payload with an
+// older-version one. UI surfaces this via a read-only banner.
+const STORAGE_READ_ONLY =
+  INITIAL_CLASSES.status === 'unsupported-version' ||
+  INITIAL_LAYOUT.status === 'unsupported-version';
+
 function App() {
-  const [classes, setClasses] = useState<SchoolClass[]>(() => loadClasses());
-  const [activeClassId, setActiveClassId] = useState<string>(() => {
-    const initial = loadClasses();
-    return initial.length > 0 ? initial[0].id : '';
-  });
-  const [layout, setLayout] = useState<ClassroomLayout>(() => loadLayout() ?? DEFAULT_LAYOUT);
+  const [classes, setClasses] = useState<SchoolClass[]>(INITIAL_CLASSES.data);
+  const [activeClassId, setActiveClassId] = useState<string>(
+    INITIAL_CLASSES.data.length > 0 ? INITIAL_CLASSES.data[0].id : ''
+  );
+  const [layout, setLayout] = useState<ClassroomLayout>(
+    INITIAL_LAYOUT.data ?? DEFAULT_LAYOUT
+  );
   const [activeTab, setActiveTab] = useState<'dashboard' | 'students' | 'rules' | 'room' | 'generator'>('dashboard');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') return 'light';
@@ -46,25 +60,26 @@ function App() {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  // Persist classes only after user mutation (skip initial mount to avoid
-  // overwriting existing data when load returned an empty default due to
-  // unsupported schema version or invalid payload).
+  // Persist classes only after user mutation, and only when not in read-only
+  // mode (read-only protects future-schema data from being overwritten).
   const classesMutatedRef = useRef(false);
   useEffect(() => {
     if (!classesMutatedRef.current) {
       classesMutatedRef.current = true;
       return;
     }
+    if (STORAGE_READ_ONLY) return;
     saveClasses(classes);
   }, [classes]);
 
-  // Persist layout: same skip-first-mount safeguard.
+  // Persist layout: same gating.
   const layoutMutatedRef = useRef(false);
   useEffect(() => {
     if (!layoutMutatedRef.current) {
       layoutMutatedRef.current = true;
       return;
     }
+    if (STORAGE_READ_ONLY) return;
     saveLayout(layout);
   }, [layout]);
 
@@ -286,6 +301,27 @@ function App() {
           </button>
         </div>
       </header>
+
+      {STORAGE_READ_ONLY && (
+        <div
+          role="alert"
+          style={{
+            margin: '0.75rem 1rem 0',
+            padding: '0.75rem 1rem',
+            border: '1px solid var(--danger, #d33)',
+            borderRadius: 'var(--radius-md, 8px)',
+            background: 'var(--danger-light, rgba(221, 51, 51, 0.08))',
+            color: 'var(--ink, inherit)',
+            fontSize: '0.9rem'
+          }}
+        >
+          <strong>Schreibgeschützter Modus.</strong> Im Browser-Speicher liegen
+          Daten in einem neueren Schema-Format, als diese App-Version versteht.
+          Speichern ist deaktiviert, damit die neueren Daten nicht überschrieben
+          werden. Bitte App-Version aktualisieren oder eine ältere Browser-Session
+          verwenden.
+        </div>
+      )}
 
       {/* Main Panel Content */}
       <main className="app-main">

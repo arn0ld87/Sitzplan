@@ -34,26 +34,29 @@ describe('storage', () => {
   });
 
   describe('loadClasses', () => {
-    it('returns empty array for empty storage', () => {
-      expect(loadClasses()).toEqual([]);
+    it('returns empty array with status=empty for empty storage', () => {
+      const r = loadClasses();
+      expect(r.data).toEqual([]);
+      expect(r.status).toBe('empty');
     });
 
-    it('returns data from a valid v1 envelope', () => {
+    it('returns data with status=ok from a valid v1 envelope', () => {
       localStorage.setItem(
         STORAGE_KEYS.classes,
         JSON.stringify({ schemaVersion: 1, data: [VALID_CLASS] })
       );
-      const result = loadClasses();
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('class-1');
+      const r = loadClasses();
+      expect(r.status).toBe('ok');
+      expect(r.data).toHaveLength(1);
+      expect(r.data[0].id).toBe('class-1');
     });
 
     it('accepts legacy v0 bare-array payload (migration v0 -> v1)', () => {
-      // pre-versioned format: classes were stored as plain JSON arrays.
       localStorage.setItem(STORAGE_KEYS.classes, JSON.stringify([VALID_CLASS]));
-      const result = loadClasses();
-      expect(result).toHaveLength(1);
-      expect(result[0].name).toBe('Test');
+      const r = loadClasses();
+      expect(r.status).toBe('ok');
+      expect(r.data).toHaveLength(1);
+      expect(r.data[0].name).toBe('Test');
     });
 
     it('rejects unsupported future schemaVersion and does not overwrite storage', () => {
@@ -64,28 +67,32 @@ describe('storage', () => {
       localStorage.setItem(STORAGE_KEYS.classes, raw);
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      const result = loadClasses();
+      const r = loadClasses();
 
-      expect(result).toEqual([]);
+      expect(r.data).toEqual([]);
+      expect(r.status).toBe('unsupported-version');
       // Storage MUST stay untouched -- the raw bytes still match.
       expect(localStorage.getItem(STORAGE_KEYS.classes)).toBe(raw);
       expect(errorSpy).toHaveBeenCalled();
     });
 
-    it('returns empty array on corrupt JSON without crashing', () => {
+    it('returns empty array with status=parse-error on corrupt JSON', () => {
       localStorage.setItem(STORAGE_KEYS.classes, '{this-is-not[json');
       vi.spyOn(console, 'error').mockImplementation(() => {});
-      expect(() => loadClasses()).not.toThrow();
-      expect(loadClasses()).toEqual([]);
+      const r = loadClasses();
+      expect(r.data).toEqual([]);
+      expect(r.status).toBe('parse-error');
     });
 
-    it('returns empty array on structurally invalid envelope data', () => {
+    it('returns empty array with status=invalid-data on structurally bad envelope', () => {
       localStorage.setItem(
         STORAGE_KEYS.classes,
         JSON.stringify({ schemaVersion: 1, data: { not: 'an array' } })
       );
       vi.spyOn(console, 'error').mockImplementation(() => {});
-      expect(loadClasses()).toEqual([]);
+      const r = loadClasses();
+      expect(r.data).toEqual([]);
+      expect(r.status).toBe('invalid-data');
     });
   });
 
@@ -104,11 +111,14 @@ describe('storage', () => {
     it('round-trips a layout through envelope', () => {
       saveLayout(VALID_LAYOUT);
       const loaded = loadLayout();
-      expect(loaded).toEqual(VALID_LAYOUT);
+      expect(loaded.status).toBe('ok');
+      expect(loaded.data).toEqual(VALID_LAYOUT);
     });
 
-    it('returns null for empty storage', () => {
-      expect(loadLayout()).toBeNull();
+    it('returns null/empty for empty storage', () => {
+      const r = loadLayout();
+      expect(r.data).toBeNull();
+      expect(r.status).toBe('empty');
     });
 
     it('rejects unsupported schemaVersion and keeps storage intact', () => {
@@ -116,7 +126,9 @@ describe('storage', () => {
       localStorage.setItem(STORAGE_KEYS.layout, raw);
       vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      expect(loadLayout()).toBeNull();
+      const r = loadLayout();
+      expect(r.data).toBeNull();
+      expect(r.status).toBe('unsupported-version');
       expect(localStorage.getItem(STORAGE_KEYS.layout)).toBe(raw);
     });
   });
