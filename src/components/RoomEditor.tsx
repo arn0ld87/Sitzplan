@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   RotateCw,
   Trash2,
@@ -15,6 +15,7 @@ import { MOCK_CLASSROOM_LAYOUT } from '../utils/mockData';
 import { newId } from '../utils/ids';
 import { countDesks } from '../utils/layoutCapacity';
 import { findOverlappingIds, wouldOverlap } from '../utils/layoutCollision';
+import { getKeyboardAction, isEditableTarget } from '../utils/editorKeymap';
 
 interface RoomEditorProps {
   layout: ClassroomLayout;
@@ -247,6 +248,54 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
     });
     setSelectedElementId(null);
   };
+
+  // Nudge selected element by one grid cell (used by arrow keys)
+  const handleNudgeSelected = (dx: number, dy: number) => {
+    if (!selectedElement) return;
+    const targetX = Math.max(0, Math.min(layout.width - selectedElement.w, selectedElement.x + dx));
+    const targetY = Math.max(0, Math.min(layout.height - selectedElement.h, selectedElement.y + dy));
+    if (targetX === selectedElement.x && targetY === selectedElement.y) return;
+    const proposed = { ...selectedElement, x: targetX, y: targetY };
+    if (checkOverlap(proposed, selectedElement.id)) return;
+    onUpdateLayout({
+      ...layout,
+      elements: layout.elements.map((el) =>
+        el.id === selectedElement.id ? proposed : el
+      )
+    });
+  };
+
+  // Global keyboard shortcuts while the room editor is mounted
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return;
+      const action = getKeyboardAction(e);
+      if (!action) return;
+      switch (action.type) {
+        case 'undo':
+          if (onUndo && canUndo) { e.preventDefault(); onUndo(); }
+          return;
+        case 'redo':
+          if (onRedo && canRedo) { e.preventDefault(); onRedo(); }
+          return;
+        case 'deselect':
+          if (selectedElementId) { e.preventDefault(); setSelectedElementId(null); }
+          return;
+        case 'delete':
+          if (selectedElementId) { e.preventDefault(); handleDeleteSelected(); }
+          return;
+        case 'rotate':
+          if (selectedElement) { e.preventDefault(); handleRotateSelected(); }
+          return;
+        case 'move':
+          if (selectedElement) { e.preventDefault(); handleNudgeSelected(action.dx, action.dy); }
+          return;
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedElementId, layout, canUndo, canRedo, onUndo, onRedo]);
 
   // Label update selected element
   const handleLabelChange = (newLabel: string) => {
