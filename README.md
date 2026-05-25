@@ -156,11 +156,31 @@ swift run SitzplanMac
 ### Scripts
 
 ```bash
-npm run dev      # Vite dev server mit HMR
-npm run build    # tsc -b && vite build → dist/
-npm run lint     # eslint .
-npm run preview  # serve dist/ lokal
+npm run dev            # Vite dev server mit HMR
+npm run build          # tsc -b && vite build → dist/
+npm run lint           # eslint .
+npm run preview        # serve dist/ lokal
+npm test               # Vitest einmaliger Lauf
+npm run test:watch     # Vitest interaktiv
+npm run test:coverage  # Vitest mit V8-Coverage-Report
 ```
+
+## Tests
+
+Die Test-Suite nutzt **Vitest** + **Testing Library** mit **jsdom**.
+
+```bash
+npm test           # einmaliger Lauf
+npm run test:watch # interaktiv
+npm run test:coverage
+```
+
+Test-Dateien liegen neben den Source-Files (`src/utils/*.test.ts`),
+Test-Fixtures unter [`src/test/fixtures/`](./src/test/fixtures/) und das
+globale Setup in [`src/test/setup.ts`](./src/test/setup.ts).
+Abgedeckt sind: Storage-Envelope + Migration, Import-Schema-Validierung,
+Solver (Hard/Soft-Constraints, Special-Needs), NLP-Parser, ID-Generator
+und das Cleanup nach Schülerlöschung.
 
 macOS:
 
