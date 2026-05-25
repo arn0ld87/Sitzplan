@@ -137,19 +137,17 @@ describe('generateSeatingPlan -- hard `not_beside` constraint', () => {
     expect(hardViolations.length).toBeGreaterThan(0);
   });
 
-  it('marks all three presets invalid when the conflict is structurally impossible', () => {
+  it('alle 3 Profile invalid bei unlösbarem Setup', () => {
     const presets = ['balanced', 'focus', 'friendship'] as const;
+    const proposals = presets.map((preset) =>
+      generateSeatingPlan(CONFLICT_STUDENTS, CONFLICT_RULES, CONFLICT_LAYOUT, preset)
+    );
 
-    presets.forEach((preset) => {
-      const proposal = generateSeatingPlan(
-        CONFLICT_STUDENTS,
-        CONFLICT_RULES,
-        CONFLICT_LAYOUT,
-        preset
-      );
-
-      expect(proposal.valid).toBe(false);
-      expect(proposal.violations.some((v) => v.type === 'hard')).toBe(true);
+    expect(proposals).toHaveLength(3);
+    expect(proposals.every((p) => p.valid === false)).toBe(true);
+    proposals.forEach((p) => {
+      const hard = p.violations.filter((v) => v.type === 'hard');
+      expect(hard.length).toBeGreaterThan(0);
     });
   });
 

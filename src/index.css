@@ -870,6 +870,28 @@ textarea.form-input {
 ::-webkit-scrollbar-thumb:hover { background-color: var(--ink-4); background-clip: padding-box; }
 
 /* =============================================================
+   Hard-Conflict Banner – M2 Slice 1
+   ============================================================= */
+
+.hard-conflict-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  margin-bottom: var(--s-4);
+  background: var(--danger-light);
+  color: var(--danger);
+  border-left: 4px solid var(--danger);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.hard-conflict-banner svg {
+  flex-shrink: 0;
+}
+
+/* =============================================================
    Motion – Reduced
    ============================================================= */
 
