@@ -23,3 +23,8 @@ coverage
 *.njsproj
 *.sln
 *.sw?
+
+# Tool sandboxes and local archives
+.dgrep/
+/Sitzplan.zip
+/logo.png
