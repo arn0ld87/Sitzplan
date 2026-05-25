@@ -104,7 +104,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <div className="card">
         <h2 className="card-title">
           <Layout size={24} />
-          Willkommen beim Sitzplan-Macher!
+          Willkommen bei PultPilot!
         </h2>
         <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
           Dieses Tool hilft Lehrkräften, Klassenzimmer visuell zu gestalten, pädagogische und physische Sitzregeln festzulegen und in Sekundenschnelle konfliktfreie Sitzpläne zu generieren.

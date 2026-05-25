@@ -246,7 +246,7 @@ function App() {
     const dataStr = JSON.stringify({ classes, layout }, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
 
-    const exportFileDefaultName = 'sitzplaner_daten_backup.json';
+    const exportFileDefaultName = 'pultpilot_daten_backup.json';
 
     const linkElement = document.createElement('a');
     linkElement.setAttribute('href', dataUri);
@@ -270,8 +270,8 @@ function App() {
       {/* Sidebar Rail */}
       <nav className="nav-tabs" aria-label="Hauptnavigation">
         <div className="brand">
-          <Sparkles size={20} />
-          <span>Sitzplaner</span>
+          <img src="/logo.png" alt="" width={20} height={20} className="brand-logo" />
+          <span>PultPilot</span>
         </div>
         {TABS.map(({ id, label, icon: Icon }) => (
           <button

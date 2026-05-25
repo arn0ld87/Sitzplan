@@ -226,6 +226,13 @@ a { color: var(--accent); text-decoration: none; }
   color: var(--color-primary) !important;
 }
 
+.brand-logo {
+  display: block;
+  object-fit: contain;
+  border-radius: 4px;
+  flex: 0 0 auto;
+}
+
 /* Topbar-Titel */
 .topbar-title {
   display: flex;
