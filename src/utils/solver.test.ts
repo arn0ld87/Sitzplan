@@ -1023,6 +1023,241 @@ describe('Slice 6 -- selectTop3Distinct', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Slice 7 — Test-Erweiterung + Performance-Budget
+// ---------------------------------------------------------------------------
+
+import {
+  M2_LARGE_STUDENTS,
+  M2_LARGE_RULES,
+  M2_LARGE_LAYOUT
+} from '../test/fixtures/m2-large-class';
+import {
+  M2_CONFLICT_STUDENTS,
+  M2_CONFLICT_RULES,
+  M2_CONFLICT_LAYOUT
+} from '../test/fixtures/m2-conflict';
+import type { ClassroomElement } from '../types';
+
+describe('Slice 7 -- performance budget @ 35 students / 30 rules', () => {
+  it('generateSeatingProposals finishes in < 2000 ms', () => {
+    // Warm-up run so JIT/import costs are not measured.
+    generateSeatingProposals(M2_LARGE_STUDENTS, M2_LARGE_RULES, M2_LARGE_LAYOUT, {
+      seed: 7
+    });
+
+    const start = performance.now();
+    const proposals = generateSeatingProposals(
+      M2_LARGE_STUDENTS,
+      M2_LARGE_RULES,
+      M2_LARGE_LAYOUT,
+      { seed: 7 }
+    );
+    const duration = performance.now() - start;
+
+    expect(proposals).toHaveLength(3);
+    expect(duration).toBeLessThan(2000);
+  }, 10000);
+});
+
+describe('Slice 7 -- determinism on large class', () => {
+  it('returns identical assignments on two consecutive calls with the same seed', () => {
+    const first = generateSeatingProposals(M2_LARGE_STUDENTS, M2_LARGE_RULES, M2_LARGE_LAYOUT, {
+      seed: 7
+    });
+    const second = generateSeatingProposals(M2_LARGE_STUDENTS, M2_LARGE_RULES, M2_LARGE_LAYOUT, {
+      seed: 7
+    });
+    expect(first).toHaveLength(3);
+    expect(second).toHaveLength(3);
+    first.forEach((p, i) => {
+      expect(p.assignments).toEqual(second[i].assignments);
+    });
+  }, 10000);
+});
+
+describe('Slice 7 -- dedup on large class >= 30% Hamming', () => {
+  it('three proposals differ in >= 30% of placements (or carry the diagnostic note)', () => {
+    const proposals = generateSeatingProposals(M2_LARGE_STUDENTS, M2_LARGE_RULES, M2_LARGE_LAYOUT, {
+      seed: 7
+    });
+    expect(proposals).toHaveLength(3);
+
+    const threshold = 0.30 * M2_LARGE_STUDENTS.length;
+    const pairs: Array<[number, number]> = [
+      [0, 1],
+      [0, 2],
+      [1, 2]
+    ];
+
+    const allDistinct = pairs.every(([i, j]) =>
+      hammingDistanceAssignments(
+        proposals[i].assignments,
+        proposals[j].assignments,
+        M2_LARGE_STUDENTS
+      ) >= threshold
+    );
+
+    const softReducedNote = proposals.every((p) =>
+      (p.diagnostics?.note ?? '').includes('ausreichend unterschiedlichen Alternativen')
+    );
+
+    expect(allDistinct || softReducedNote).toBe(true);
+  }, 10000);
+});
+
+describe('Slice 7 -- special needs placement (Hörschwäche → vorderste Reihe)', () => {
+  it('places the Hörschwäche student on a desk with minimal y', () => {
+    // Tiny layout: 4 desks in 2 rows (front y=1, back y=4). The Hörschwäche
+    // student must land on a y=1 desk. Filler students keep the solver
+    // honest by occupying the back row.
+    const layout: ClassroomLayout = {
+      width: 8,
+      height: 8,
+      elements: [
+        { id: 's7-board', type: 'board', x: 2, y: 0, w: 4, h: 1, rotation: 0 },
+        { id: 's7-desk-f1', type: 'desk', x: 2, y: 1, w: 1, h: 1, rotation: 0 },
+        { id: 's7-desk-f2', type: 'desk', x: 4, y: 1, w: 1, h: 1, rotation: 0 },
+        { id: 's7-desk-b1', type: 'desk', x: 2, y: 4, w: 1, h: 1, rotation: 0 },
+        { id: 's7-desk-b2', type: 'desk', x: 4, y: 4, w: 1, h: 1, rotation: 0 }
+      ]
+    };
+    const students: Student[] = [
+      { id: 's7-hoer', name: 'Hannah', specialNeeds: ['Hörschwäche'] },
+      { id: 's7-f1', name: 'F1', specialNeeds: [] },
+      { id: 's7-f2', name: 'F2', specialNeeds: [] },
+      { id: 's7-f3', name: 'F3', specialNeeds: [] }
+    ];
+
+    const proposals = generateSeatingProposals(students, [], layout, { seed: 7 });
+    expect(proposals.length).toBeGreaterThan(0);
+
+    const desks = layout.elements.filter((el) => el.type === 'desk') as ClassroomElement[];
+    const minDeskY = Math.min(...desks.map((d) => d.y));
+
+    proposals.forEach((p) => {
+      const deskOfHoer = Object.entries(p.assignments).find(
+        ([, sid]) => sid === 's7-hoer'
+      );
+      expect(deskOfHoer).toBeDefined();
+      const desk = desks.find((d) => d.id === deskOfHoer![0])!;
+      expect(desk.y).toBe(minDeskY);
+    });
+  }, 10000);
+});
+
+describe('Slice 7 -- special needs placement (Barrierefreiheit nahe Tür)', () => {
+  it('places the affected student within distance <= 2 of a door element', () => {
+    // 2×3 desk grid with door tucked into a corner. The minX/maxX edge
+    // desks are also the desks closest to the door, so the solver's
+    // "edge or door-adjacent" definition collapses to "door-adjacent"
+    // for the affected student.
+    const layout: ClassroomLayout = {
+      width: 8,
+      height: 8,
+      elements: [
+        { id: 's7b-board', type: 'board', x: 2, y: 0, w: 4, h: 1, rotation: 0 },
+        // Door directly adjacent to the desk cluster.
+        { id: 's7b-door', type: 'door', x: 3, y: 3, w: 1, h: 1, rotation: 0 },
+        // 2x2 cluster of desks all within distance ~1.5 of the door.
+        { id: 's7b-desk-1', type: 'desk', x: 2, y: 2, w: 1, h: 1, rotation: 0 },
+        { id: 's7b-desk-2', type: 'desk', x: 4, y: 2, w: 1, h: 1, rotation: 0 },
+        { id: 's7b-desk-3', type: 'desk', x: 2, y: 4, w: 1, h: 1, rotation: 0 },
+        { id: 's7b-desk-4', type: 'desk', x: 4, y: 4, w: 1, h: 1, rotation: 0 }
+      ]
+    };
+    const students: Student[] = [
+      { id: 's7b-barr', name: 'Bea', specialNeeds: ['Barrierefreiheit'] },
+      { id: 's7b-f1', name: 'F1', specialNeeds: [] },
+      { id: 's7b-f2', name: 'F2', specialNeeds: [] },
+      { id: 's7b-f3', name: 'F3', specialNeeds: [] }
+    ];
+
+    const proposals = generateSeatingProposals(students, [], layout, { seed: 7 });
+    expect(proposals.length).toBeGreaterThan(0);
+
+    const desks = layout.elements.filter((el) => el.type === 'desk') as ClassroomElement[];
+    const doors = layout.elements.filter((el) => el.type === 'door') as ClassroomElement[];
+
+    proposals.forEach((p) => {
+      const entry = Object.entries(p.assignments).find(([, sid]) => sid === 's7b-barr');
+      expect(entry).toBeDefined();
+      const desk = desks.find((d) => d.id === entry![0])!;
+      const minDoorDist = Math.min(
+        ...doors.map((door) =>
+          Math.sqrt((desk.x - door.x) ** 2 + (desk.y - door.y) ** 2)
+        )
+      );
+      expect(minDoorDist).toBeLessThanOrEqual(2);
+    });
+  }, 10000);
+});
+
+describe('Slice 7 -- special needs placement (Konzentrationsbedarf weg vom Fenster)', () => {
+  it('places the affected student at distance >= 2 from any window element', () => {
+    // 4 desks in a row, window at x=0. Desk x=1 is too close (distance 1),
+    // desk x=3 is just within window-safe distance.
+    const layout: ClassroomLayout = {
+      width: 8,
+      height: 6,
+      elements: [
+        { id: 's7k-board', type: 'board', x: 2, y: 0, w: 4, h: 1, rotation: 0 },
+        { id: 's7k-window', type: 'window', x: 0, y: 3, w: 1, h: 1, rotation: 90 },
+        { id: 's7k-desk-1', type: 'desk', x: 1, y: 3, w: 1, h: 1, rotation: 0 },
+        { id: 's7k-desk-2', type: 'desk', x: 3, y: 3, w: 1, h: 1, rotation: 0 },
+        { id: 's7k-desk-3', type: 'desk', x: 5, y: 3, w: 1, h: 1, rotation: 0 },
+        { id: 's7k-desk-4', type: 'desk', x: 6, y: 3, w: 1, h: 1, rotation: 0 }
+      ]
+    };
+    const students: Student[] = [
+      { id: 's7k-konz', name: 'Kai', specialNeeds: ['Konzentrationsbedarf'] },
+      { id: 's7k-f1', name: 'F1', specialNeeds: [] },
+      { id: 's7k-f2', name: 'F2', specialNeeds: [] },
+      { id: 's7k-f3', name: 'F3', specialNeeds: [] }
+    ];
+
+    const proposals = generateSeatingProposals(students, [], layout, { seed: 7 });
+    expect(proposals.length).toBeGreaterThan(0);
+
+    const desks = layout.elements.filter((el) => el.type === 'desk') as ClassroomElement[];
+    const windows = layout.elements.filter((el) => el.type === 'window') as ClassroomElement[];
+
+    proposals.forEach((p) => {
+      const entry = Object.entries(p.assignments).find(([, sid]) => sid === 's7k-konz');
+      expect(entry).toBeDefined();
+      const desk = desks.find((d) => d.id === entry![0])!;
+      const minWinDist = Math.min(
+        ...windows.map((win) =>
+          Math.sqrt((desk.x - win.x) ** 2 + (desk.y - win.y) ** 2)
+        )
+      );
+      expect(minWinDist).toBeGreaterThanOrEqual(2);
+    });
+  }, 10000);
+});
+
+describe('Slice 7 -- Konfliktanalyse: bottlenecks + contradictoryRules', () => {
+  it('reports frontRow bottleneck (required >= 8, available == 2) and contradictoryRules >= 1', () => {
+    const proposals = generateSeatingProposals(
+      M2_CONFLICT_STUDENTS,
+      M2_CONFLICT_RULES,
+      M2_CONFLICT_LAYOUT,
+      { seed: 7 }
+    );
+    expect(proposals.length).toBeGreaterThan(0);
+
+    const diag = proposals[0].diagnostics;
+    expect(diag).toBeDefined();
+
+    const frontRowBottleneck = diag!.bottlenecks.find((b) => b.kind === 'frontRow');
+    expect(frontRowBottleneck).toBeDefined();
+    expect(frontRowBottleneck!.required).toBeGreaterThanOrEqual(8);
+    expect(frontRowBottleneck!.available).toBe(2);
+
+    expect(diag!.contradictoryRules.length).toBeGreaterThanOrEqual(1);
+  }, 10000);
+});
+
 describe('Slice 6 -- generateSeatingProposals dedup integration', () => {
   it('returns 3 proposals that differ from each other or carry the note', () => {
     const proposals = generateSeatingProposals(

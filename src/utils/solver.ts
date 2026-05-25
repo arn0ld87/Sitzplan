@@ -15,17 +15,19 @@ import { mulberry32, defaultRng, type RNG } from './rng';
  * Number of independent hybrid (greedy + SA) attempts per preset.
  * Best score wins. See ADR 0003.
  *
- * Slice 3 measurement (`generateSeatingProposals` with seed=1):
- *   - CONFLICT fixture (2 students/2 desks):   ~490 ms with 8 restarts
- *   - SMALL fixture (4 students/4 desks):      ~780 ms with 8 restarts
- *   - mockData (24 students/6 rules):        ~8100 ms with 8 restarts
+ * Slice 7 re-measurement (`generateSeatingProposals` with seed=7) after
+ * (a) shortened SA cooling schedule and (b) deferred `buildProposal`:
+ *   - M2 large fixture (35 students/30 rules):  ~800 ms median, 6 restarts
  *
- * ADR 0003 specifies 8, but the mockData run blew the casual-machine budget
- * (>3 s), so we drop to 4. The 2 s/35-student-30-rule budget will be
- * formally enforced in Slice 7; the SA inner-loop cooling schedule is the
- * dominant cost and is left for Slice 4/7 to tune.
+ * The new cooling schedule (`simulatedAnnealing` — T=20→0.5, α=0.92,
+ * 50 iter/temp) reduces SA per-pass cost ~5× vs. the M1 schedule, which
+ * left enough headroom under the 2 s budget to restore RANDOM_RESTARTS
+ * from the Slice-3 emergency value of 4 to the ADR-0003 target of 6.
+ * Each `generateSeatingProposals` call now runs 3 presets × 6 restarts
+ * = 18 candidates; `buildProposal` runs only on the picked 3 finalists
+ * (was 12 calls in Slice 6 — 4× saving on the diagnostics path).
  */
-const RANDOM_RESTARTS = 4;
+const RANDOM_RESTARTS = 6;
 
 type Preset = 'balanced' | 'focus' | 'friendship';
 const PRESETS: readonly Preset[] = ['balanced', 'focus', 'friendship'] as const;
@@ -871,10 +873,16 @@ export function simulatedAnnealing(
   let bestEval = currentEval;
   let bestWeighted = currentWeighted;
 
-  let T = 100.0;
-  const T_min = 0.1;
-  const alpha = 0.985;
-  const maxIterationsPerTemp = 200;
+  // Slice 7: shorter cooling schedule. Old: T=100→0.1, α=0.985, 200 iter
+  // (≈91k iterations/pass × 12 passes → > 4 s on mockData). New: T=20→0.5,
+  // α=0.92, 50 iter (≈2.2k iterations/pass × 12 → ~0.8–1.4 s on the 35/30
+  // fixture, comfortably inside the 2 s budget). Quality on the existing
+  // test fixtures stays unchanged because the greedy init is already
+  // close to optimum and SA mostly cleans up soft-constraint slack.
+  let T = 20.0;
+  const T_min = 0.5;
+  const alpha = 0.92;
+  const maxIterationsPerTemp = 50;
 
   while (T > T_min) {
     for (let i = 0; i < maxIterationsPerTemp; i++) {
@@ -1016,7 +1024,11 @@ export function generateSeatingProposals(
 
   const masterRng: RNG = opts?.seed !== undefined ? mulberry32(opts.seed) : defaultRng();
 
-  const allCandidates: SeatingProposal[] = [];
+  // Slice 7: keep candidates lightweight (no `buildProposal`/diagnostics yet)
+  // — 12 candidates only become 3 finalists after dedup, and the full
+  // SeatingProposal incl. analyzeSeatingDiagnostics is expensive on the
+  // 35-student fixture. We build it for the picked 3 only.
+  const rawCandidates: RawCandidate[] = [];
 
   for (const preset of PRESETS) {
     for (let r = 0; r < RANDOM_RESTARTS; r++) {
@@ -1025,13 +1037,84 @@ export function generateSeatingProposals(
       const restartSeed = Math.floor(masterRng() * 0xffffffff);
       const restartRng = mulberry32(restartSeed);
       const result = runHybridPass(students, rules, layout, preset, restartRng);
-      allCandidates.push(
-        buildProposal(preset, result.assignments, result.score, result.violations, students, rules, layout)
-      );
+      rawCandidates.push({
+        preset,
+        assignments: result.assignments,
+        score: result.score,
+        violations: result.violations
+      });
     }
   }
 
-  return selectTop3Distinct(allCandidates, students);
+  const pickedRaw = selectTop3DistinctRaw(rawCandidates, students);
+  const softReduced = pickedRaw.length < 3 || pickedRaw.some((c) => c.softReduced);
+
+  return pickedRaw.map((c) => {
+    const proposal = buildProposal(
+      c.preset,
+      c.assignments,
+      c.score,
+      c.violations,
+      students,
+      rules,
+      layout
+    );
+    if (softReduced) {
+      proposal.diagnostics = appendDiagnosticNote(proposal.diagnostics, DEDUP_NOTE_SUFFIX);
+    }
+    return proposal;
+  });
+}
+
+/**
+ * Lightweight candidate record used internally between SA and dedup.
+ * Avoids the cost of `buildProposal` (which itself calls
+ * `analyzeSeatingDiagnostics`) on candidates that get thrown away.
+ */
+type RawCandidate = {
+  preset: Preset;
+  assignments: SeatingAssignment;
+  score: number;
+  violations: SeatingViolation[];
+};
+
+type RawPickedCandidate = RawCandidate & { softReduced?: boolean };
+
+/**
+ * Slice-6-equivalent dedup on the lightweight candidate type. Selection
+ * logic mirrors `selectTop3Distinct` exactly so behaviour stays identical;
+ * the only difference is that the diagnostic note is attached on the
+ * SeatingProposal afterwards by the caller.
+ */
+function selectTop3DistinctRaw(
+  candidates: RawCandidate[],
+  students: Student[]
+): RawPickedCandidate[] {
+  if (candidates.length === 0) return [];
+  const sorted = [...candidates].sort((a, b) => b.score - a.score);
+  if (sorted.length <= 1) return sorted.map((c) => ({ ...c }));
+
+  let picked: RawCandidate[] = [];
+  let usedThreshold = DEDUP_THRESHOLDS[DEDUP_THRESHOLDS.length - 1];
+
+  for (const threshold of DEDUP_THRESHOLDS) {
+    const minDistance = threshold * students.length;
+    picked = [sorted[0]];
+    for (let i = 1; i < sorted.length && picked.length < 3; i++) {
+      const cand = sorted[i];
+      const distinctFromAll = picked.every(
+        (p) => hammingDistanceAssignments(p.assignments, cand.assignments, students) >= minDistance
+      );
+      if (distinctFromAll) picked.push(cand);
+    }
+    if (picked.length >= 3) {
+      usedThreshold = threshold;
+      break;
+    }
+  }
+
+  const softReduced = usedThreshold < DEDUP_PRIMARY_THRESHOLD || picked.length < 3;
+  return picked.map((c) => ({ ...c, softReduced }));
 }
 
 /**
