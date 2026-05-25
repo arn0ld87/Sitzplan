@@ -62,26 +62,26 @@ Abnahme:
 - Import kaputter JSON-Dateien zerstört keine Daten — erfüllt (Slice 2)
 - vorhandene Nutzerdaten werden migriert — erfüllt (Slice 1, v0 → v1)
 
-## Milestone 2 – Solver-Qualität und Konfliktanalyse
+## Milestone 2 – Solver-Qualität und Konfliktanalyse  ✅ ERLEDIGT 2026-05-25
 
 Ziel: Vorschläge werden zuverlässiger und erklärbarer.
 
 Pflichtaufgaben:
 
-- harte Regelverletzungen als ungültig behandeln
-- Konfliktanalyse bei unlösbaren Regeln
-- Random-Restarts oder mehrere Kandidatenläufe
-- Schwierigkeitsgewichtung pro Schüler:in
-- bessere Scoring-Erklärungen
-- Vorschläge deduplizieren
-- Tests für Hard-/Soft-Regeln erweitern
+- harte Regelverletzungen als ungültig behandeln — erfüllt (Slice 1, Banner im Generator + Test "alle 3 Profile invalid")
+- Konfliktanalyse bei unlösbaren Regeln — erfüllt (Slice 2 via Commit `4c27b4c`, `SolverDiagnostics` in `SeatingProposal` mit Bottlenecks + contradictoryRules, siehe ADR 0004)
+- Random-Restarts oder mehrere Kandidatenläufe — erfüllt (Slice 3, Hybrid-Solver Greedy + SA + 6 Restarts pro Profil, siehe ADR 0003; deterministisch via Seed, siehe ADR 0005)
+- Schwierigkeitsgewichtung pro Schüler:in — erfüllt (Slice 4, `computeStudentDifficulty` HEURISTIC_PLAN §6 in Greedy-Init + SA-Penalty-Multiplier)
+- bessere Scoring-Erklärungen — erfüllt (Slice 5, DE-Strings pro Violation + "Ziel/Erreicht/Offen"-3-Zeiler in `explanation`)
+- Vorschläge deduplizieren — erfüllt (Slice 6, Hamming-Distanz ≥ 30 % über alle 18 Kandidaten mit weicher Reduktion)
+- Tests für Hard-/Soft-Regeln erweitern — erfüllt (Slice 7, 95 Tests inkl. Sonderbedarfs-Platzierungen, Determinismus, Performance, Konflikt-Diagnose)
 
 Abnahme:
 
-- gültige Vorschläge enthalten keine Hard-Violations
-- bei unlösbaren Regeln erscheint eine konkrete Diagnose
-- drei Vorschläge unterscheiden sich sinnvoll
-- Laufzeit bleibt unter 2 Sekunden bei 35 Schüler:innen
+- gültige Vorschläge enthalten keine Hard-Violations — erfüllt
+- bei unlösbaren Regeln erscheint eine konkrete Diagnose — erfüllt (Banner + Diagnose-Panel)
+- drei Vorschläge unterscheiden sich sinnvoll — erfüllt (Dedup-Test auf Large-Fixture)
+- Laufzeit bleibt unter 2 Sekunden bei 35 Schüler:innen — erfüllt (`generateSeatingProposals` ≈ 800 ms median auf M2-Large-Fixture, Vitest-assert < 2000 ms)
 
 ## Milestone 3 – Raumeditor und Bedienbarkeit
 
