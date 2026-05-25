@@ -6,7 +6,8 @@ import {
   Grid,
   Sparkles,
   Sun,
-  Moon
+  Moon,
+  ChevronDown
 } from 'lucide-react';
 import type { SchoolClass, ClassroomLayout, Student, Rule, SpecialNeed } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -39,6 +40,19 @@ const STORAGE_READ_ONLY =
   INITIAL_CLASSES.status === 'unsupported-version' ||
   INITIAL_LAYOUT.status === 'unsupported-version';
 
+function BrandMark({ size = 28 }: { size?: number }) {
+  return (
+    <img
+      src="/logo.png"
+      width={size}
+      height={size}
+      alt=""
+      aria-hidden="true"
+      className="brand-mark"
+    />
+  );
+}
+
 function App() {
   const [classes, setClasses] = useState<SchoolClass[]>(INITIAL_CLASSES.data);
   const [activeClassId, setActiveClassId] = useState<string>(
@@ -49,10 +63,10 @@ function App() {
   );
   const [activeTab, setActiveTab] = useState<'dashboard' | 'students' | 'rules' | 'room' | 'generator'>('dashboard');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    if (typeof window === 'undefined') return 'dark';
+    if (typeof window === 'undefined') return 'light';
     const saved = localStorage.getItem('sitzplaner_theme') as 'light' | 'dark' | null;
     if (saved) return saved;
-    return 'dark';
+    return 'light';
   });
 
   // Apply data-theme attribute whenever theme changes (covers initial + toggle).
@@ -256,49 +270,129 @@ function App() {
 
   const activeClass = classes.find((c) => c.id === activeClassId);
 
-  const TABS: { id: typeof activeTab; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
-    { id: 'dashboard', label: 'Dashboard',          icon: LayoutDashboard },
-    { id: 'students',  label: 'Schülerliste',       icon: Users },
-    { id: 'rules',     label: 'Sitzregeln',         icon: SlidersHorizontal },
-    { id: 'room',      label: 'Raumeditor',         icon: Grid },
-    { id: 'generator', label: 'Sitzplan-Generator', icon: Sparkles },
+  type NavId = typeof activeTab;
+  type NavItem = {
+    id: NavId;
+    label: string;
+    icon: React.ComponentType<{ size?: number }>;
+    count?: number;
+  };
+  type NavGroup = { title: string; items: NavItem[] };
+
+  const studentCount = activeClass?.students.length ?? 0;
+  const ruleCount = activeClass?.rules.length ?? 0;
+
+  const NAV_GROUPS: NavGroup[] = [
+    {
+      title: 'Überblick',
+      items: [{ id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }],
+    },
+    {
+      title: 'Planung',
+      items: [
+        { id: 'students', label: 'Schülerliste', icon: Users, count: studentCount },
+        { id: 'rules',    label: 'Sitzregeln',  icon: SlidersHorizontal, count: ruleCount },
+      ],
+    },
+    {
+      title: 'Raum & Sitzplan',
+      items: [
+        { id: 'room',      label: 'Raumeditor', icon: Grid },
+        { id: 'generator', label: 'Generator',  icon: Sparkles },
+      ],
+    },
   ];
-  const currentTab = TABS.find((t) => t.id === activeTab);
+
+  const TITLES: Record<NavId, { title: string; sub: string }> = {
+    dashboard: { title: 'Dashboard',          sub: 'Überblick & Klassenverwaltung' },
+    students:  { title: 'Schülerliste',       sub: studentCount === 1 ? '1 Schüler' : `${studentCount} Schüler` },
+    rules:     { title: 'Sitzregeln',         sub: ruleCount === 1 ? '1 aktive Regel' : `${ruleCount} aktive Regeln` },
+    room:      { title: 'Raumeditor',         sub: 'Klassenzimmer-Grundriss bearbeiten' },
+    generator: { title: 'Sitzplan-Generator', sub: 'Vorschläge berechnen und anwenden' },
+  };
+  const current = TITLES[activeTab];
 
   return (
     <div className="app-container">
       {/* Sidebar Rail */}
       <nav className="nav-tabs" aria-label="Hauptnavigation">
         <div className="brand">
-          <img src="/logo.png" alt="" width={20} height={20} className="brand-logo" />
-          <span>PultPilot</span>
+          <BrandMark size={22} />
+          <span className="brand-wordmark">
+            Pult<span className="accent">Pilot</span>
+          </span>
         </div>
-        {TABS.map(({ id, label, icon: Icon }) => (
+
+        {activeClass && (
           <button
-            key={id}
-            className={`tab-btn ${activeTab === id ? 'active' : ''}`}
-            onClick={() => setActiveTab(id)}
-            aria-current={activeTab === id ? 'page' : undefined}
+            type="button"
+            className="class-switch"
+            onClick={() => setActiveTab('dashboard')}
+            aria-label="Klasse wechseln"
           >
-            <Icon size={17} />
-            <span>{label}</span>
+            <span className="cs-main">
+              <span className="cs-label">Aktive Klasse</span>
+              <span className="cs-name">
+                {activeClass.name} · {studentCount} {studentCount === 1 ? 'Schüler' : 'Schüler'}
+              </span>
+            </span>
+            <ChevronDown size={14} className="cs-chev" />
           </button>
-        ))}
+        )}
+
+        <div className="sidebar-nav">
+          {NAV_GROUPS.map((group) => (
+            <div className="sidebar-section" key={group.title}>
+              <div className="sidebar-section-title">{group.title}</div>
+              {group.items.map(({ id, label, icon: Icon, count }) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`tab-btn ${activeTab === id ? 'active' : ''}`}
+                  onClick={() => setActiveTab(id)}
+                  aria-current={activeTab === id ? 'page' : undefined}
+                >
+                  <Icon size={16} />
+                  <span>{label}</span>
+                  {count != null && <span className="ni-count">{count}</span>}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        <div className="sidebar-foot">
+          <button
+            type="button"
+            className="tab-btn"
+            onClick={toggleTheme}
+            aria-label="Farbschema umschalten"
+          >
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+            <span>{theme === 'dark' ? 'Hell' : 'Dunkel'}</span>
+          </button>
+          <div className="foot-row">
+            <span className="legal">
+              <a href="#" onClick={(e) => e.preventDefault()}>Impressum</a>
+              <span className="sep">·</span>
+              <a href="#" onClick={(e) => e.preventDefault()}>Datenschutz</a>
+            </span>
+            <span className="version">v0.4</span>
+          </div>
+        </div>
       </nav>
 
-      {/* Frosted Topbar */}
+      {/* Topbar */}
       <header className="app-header">
         <div className="topbar-title">
-          <span className="topbar-eyebrow">
-            {activeClass ? activeClass.name : 'Keine Klasse ausgewählt'}
-          </span>
-          <h1 className="topbar-headline">{currentTab?.label}</h1>
+          <h1 className="topbar-headline">{current.title}</h1>
+          <span className="topbar-eyebrow">{current.sub}</span>
         </div>
 
         <div className="header-actions">
-          <button className="theme-toggle" onClick={toggleTheme} aria-label="Farbschema umschalten">
-            {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
-          </button>
+          <span className="autosave-badge" title="Daten werden lokal gespeichert">
+            Auto-Speichern
+          </span>
         </div>
       </header>
 
