@@ -27,13 +27,13 @@ Der Solver wird auf einen **Hybrid-Ansatz** umgestellt:
 
 1. `greedyInitialAssignment(students, seats, rules, rng)` sortiert Schüler:innen nach Schwierigkeit (siehe ADR 0004 / Slice 4) und platziert sie nacheinander auf den unter den Constraints noch zulässigen Plätzen mit dem besten lokalen Score. Hard-Position-Regeln werden in dieser Phase priorisiert.
 2. Anschließend läuft das bestehende SA auf der greedy gefundenen Initialbelegung – mit verkürzter Schleife, da der Startpunkt schon näher am Optimum liegt.
-3. Um nicht in einem lokalen Optimum stecken zu bleiben, werden **`RANDOM_RESTARTS = 8`** unabhängige Hybrid-Läufe ausgeführt; die beste Lösung gewinnt. Alle Kandidaten gehen außerdem in die Dedup-Auswahl der Top-3 ein (siehe ADR-frei, Slice 6).
+3. Um nicht in einem lokalen Optimum stecken zu bleiben, werden **`RANDOM_RESTARTS = 4`** unabhängige Hybrid-Läufe pro Preset ausgeführt; die beste Lösung gewinnt. Alle Kandidaten gehen außerdem in die Dedup-Auswahl der Top-3 ein (siehe Slice 6).
 
-Der Konstantenwert 8 ist ein Kompromiss aus:
-- Genug Vielfalt, damit Random-Restart-Effekt greift (empirisch ab ≈5).
-- Klein genug, dass das 2-Sekunden-Performance-Budget gehalten wird (mit reduzierter SA-Schleifenlänge pro Restart).
+Der Wert wurde in Slice 3 (Commit `4694bab`) auf 4 festgesetzt – ursprünglich war 8 geplant, aber bereits 8 Restarts hat den casual-Laufzeitrahmen auf der mockData-Klasse (24 Schüler:innen, 6 Regeln) auf ≈8 s gedrückt. Halbierung auf 4 brachte ≈4 s. Dominante Kosten liegen nicht beim Restart, sondern in der SA-Cooling-Schedule (T 100 → 0.1 bei α = 0.985, 200 Iter/Temp). Die Schedule muss in Slice 7 getunt werden, damit das 2-Sekunden-Budget bei 35 Schüler:innen / 30 Regeln gehalten wird; erst danach kann `RANDOM_RESTARTS` wieder Richtung 6–8 angehoben werden.
 
-Die Restart-Anzahl wird in Slice 3 gemessen und ggf. reduziert, bevor Slices 4–6 darauf aufbauen.
+Der Wert 4 ist ein Kompromiss aus:
+- Genug Vielfalt, damit Random-Restart-Effekt überhaupt greift.
+- Klein genug, dass Slice 4–6 nicht auf einem schon-zu-langsamen Solver weiterbauen.
 
 ## Konsequenzen
 
