@@ -4,8 +4,7 @@ import {
   Trash2,
   Maximize2,
   Grid,
-  Compass,
-  Square
+  Compass
 } from 'lucide-react';
 import type { ClassroomElement, ClassroomLayout, ElementType } from '../types';
 import { MOCK_CLASSROOM_LAYOUT } from '../utils/mockData';
@@ -426,35 +425,26 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
               Wähle ein Element, um es auf dem Gitter zu platzieren. Wähle den Zeiger, um Elemente zu verschieben.
             </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1rem' }}>
+            <div className="tool-chip-list">
               <button
                 type="button"
-                className={`btn btn-secondary ${selectedTool === 'select' ? 'btn-primary' : ''}`}
+                className={`tool-chip ${selectedTool === 'select' ? 'active' : ''}`}
                 onClick={() => setSelectedTool('select')}
-                style={{ fontSize: '0.85rem', padding: '0.5rem' }}
               >
-                <Compass size={16} />
-                Zeiger (Verschieben)
+                <Compass size={14} />
+                <span>Auswählen & Verschieben</span>
               </button>
               {ELEMENT_CATALOG.map((cat) => (
                 <button
                   key={cat.type}
                   type="button"
-                  className={`btn btn-secondary ${selectedTool === cat.type ? 'btn-primary' : ''}`}
+                  className={`tool-chip ${selectedTool === cat.type ? 'active' : ''}`}
                   onClick={() => {
                     setSelectedTool(cat.type);
                     setSelectedElementId(null);
                   }}
-                  style={{
-                    fontSize: '0.85rem',
-                    padding: '0.5rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem'
-                  }}
                 >
-                  <Square size={12} fill={cat.color} stroke="none" />
-                  + {cat.type === 'desk' ? 'Sitzplatz' : cat.type === 'board' ? 'Tafel' : cat.type === 'window' ? 'Fenster' : cat.type === 'door' ? 'Tür' : cat.type === 'cupboard' ? 'Schrank' : 'Möbel'}
+                  <span>{cat.type === 'desk' ? 'Sitzplatz' : cat.type === 'board' ? 'Tafel' : cat.type === 'window' ? 'Fenster' : cat.type === 'door' ? 'Tür' : cat.type === 'cupboard' ? 'Schrank' : 'Lehrerpult'}</span>
                 </button>
               ))}
             </div>

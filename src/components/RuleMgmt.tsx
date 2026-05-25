@@ -105,25 +105,14 @@ export const RuleMgmt: React.FC<RuleMgmtProps> = ({
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               {activeClass.rules.map((rule) => (
-                <div
-                  key={rule.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '0.85rem 1.25rem',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-md)',
-                    backgroundColor: 'var(--bg-app)',
-                    transition: 'var(--transition)'
-                  }}
-                >
+                <div key={rule.id} className="rule-row">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
                     <span
-                      className={`badge ${rule.strictness === 'hard' ? 'badge-danger' : 'badge-primary'}`}
-                      style={{ minWidth: '70px', justifyContent: 'center' }}
+                      className={`rule-strictness-tag ${
+                        rule.strictness === 'hard' ? 'rule-strictness-hard' : 'rule-strictness-soft'
+                      }`}
                     >
-                      {rule.strictness === 'hard' ? 'Hart' : 'Weich'}
+                      {rule.strictness === 'hard' ? 'HARD' : 'SOFT'}
                     </span>
                     <span
                       style={{ fontSize: '0.95rem' }}
@@ -131,11 +120,11 @@ export const RuleMgmt: React.FC<RuleMgmtProps> = ({
                     />
                   </div>
                   <button
-                    className="btn btn-secondary btn-sm"
+                    className="rule-delete-btn"
                     onClick={() => onDeleteRule(rule.id)}
-                    style={{ color: 'var(--danger)', border: 'none', padding: '0.35rem' }}
+                    aria-label="Regel löschen"
                   >
-                    <Trash2 size={16} />
+                    <Trash2 size={14} />
                   </button>
                 </div>
               ))}

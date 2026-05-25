@@ -268,50 +268,39 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* Stats Grid */}
       <div className="grid-3" style={{ marginBottom: '2rem' }}>
-        <div className="card" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-          <div style={{
-            background: 'var(--primary-light)',
-            color: 'var(--primary)',
-            padding: '1rem',
-            borderRadius: 'var(--radius-md)'
-          }}>
-            <Users size={28} />
+        <div className="stat-card">
+          <div className="stat-card-icon">
+            <Users size={18} />
           </div>
           <div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>Schüler in dieser Klasse</div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 700 }}>{totalStudents}</div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>({totalRules} aktive Sitzregeln)</div>
+            <div className="stat-card-label">Schüler in dieser Klasse</div>
+            <div className="stat-card-number">{totalStudents}</div>
+            <div className="stat-card-sub">({totalRules} aktive Sitzregeln)</div>
           </div>
         </div>
 
-        <div className="card" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-          <div style={{
-            background: 'var(--accent-light)',
-            color: 'var(--accent)',
-            padding: '1rem',
-            borderRadius: 'var(--radius-md)'
-          }}>
-            <AlertCircle size={28} />
+        <div className="stat-card">
+          <div className="stat-card-icon">
+            <AlertCircle size={18} />
           </div>
           <div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>Schüler mit besonderem Bedarf</div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 700 }}>{specialNeedsCount}</div>
+            <div className="stat-card-label">Förderbedarf</div>
+            <div className="stat-card-number">{specialNeedsCount}</div>
+            <div className="stat-card-sub">besondere Bedarfe</div>
           </div>
         </div>
 
-        <div className="card" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-          <div style={{
-            background: 'var(--primary-light)',
-            color: 'var(--primary)',
-            padding: '1rem',
-            borderRadius: 'var(--radius-md)'
-          }}>
-            <Sliders size={28} />
+        <div className="stat-card">
+          <div className="stat-card-icon">
+            <Sliders size={18} />
           </div>
           <div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>Sitzplatzkapazität (Frei / Belegt)</div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 700 }}>
-              {totalSeats} Plätze <span style={{ fontSize: '1rem', fontWeight: 500, color: 'var(--text-muted)' }}>({totalSeats >= totalStudents ? 'Ausreichend' : 'Zu wenig!'})</span>
+            <div className="stat-card-label">Sitzplatzkapazität</div>
+            <div className="stat-card-number">
+              {totalSeats} <span style={{ fontSize: '14px', fontWeight: 400, color: 'var(--color-text-muted)' }}>Plätze</span>
+            </div>
+            <div className="stat-card-sub" style={{ color: totalSeats >= totalStudents ? 'var(--color-primary)' : 'var(--color-error)' }}>
+              {totalSeats >= totalStudents ? 'Ausreichend freie Sitze' : 'Zu wenig Sitzplätze!'}
             </div>
           </div>
         </div>
