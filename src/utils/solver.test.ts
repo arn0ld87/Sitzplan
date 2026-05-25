@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { generateSeatingPlan, generateSeatingProposals, evaluateSeating } from './solver';
-import type { Rule, ClassroomLayout, SeatingAssignment } from '../types';
+import {
+  generateSeatingPlan,
+  generateSeatingProposals,
+  evaluateSeating,
+  computeStudentDifficulty
+} from './solver';
+import type { Rule, ClassroomLayout, SeatingAssignment, Student } from '../types';
 import {
   SMALL_STUDENTS,
   SMALL_LAYOUT
@@ -736,5 +741,62 @@ describe('Slice 5 -- explanation 3-line summary structure', () => {
 
     const friend = generateSeatingPlan(SMALL_STUDENTS, [], SMALL_LAYOUT, 'friendship');
     expect(friend.explanation.toLowerCase()).toContain('freundschaft');
+  });
+});
+
+describe('Slice 4 -- computeStudentDifficulty', () => {
+  it('returns 0 for an unconstrained student without special needs', () => {
+    const student: Student = { id: 'stu-0', name: 'Zero', specialNeeds: [] };
+    expect(computeStudentDifficulty(student, [])).toBe(0);
+  });
+
+  it('returns the weighted sum 2*10 + 3*3 + 1*6 + 2*4 = 43 for a mixed student', () => {
+    const student: Student = {
+      id: 'stu-mix',
+      name: 'Mix',
+      specialNeeds: ['Sehschwäche']
+    };
+    const rules: Rule[] = [
+      // 2 hard position rules (no targetId)
+      { id: 'r-h1', studentId: 'stu-mix', type: 'front', strictness: 'hard' },
+      { id: 'r-h2', studentId: 'stu-mix', type: 'near_door', strictness: 'hard' },
+      // 3 soft position rules
+      { id: 'r-s1', studentId: 'stu-mix', type: 'edge', strictness: 'soft' },
+      { id: 'r-s2', studentId: 'stu-mix', type: 'back', strictness: 'soft' },
+      { id: 'r-s3', studentId: 'stu-mix', type: 'not_window', strictness: 'soft' },
+      // 2 relation rules (targetId set)
+      {
+        id: 'r-rel1',
+        studentId: 'stu-mix',
+        type: 'beside',
+        targetId: 'stu-other',
+        strictness: 'soft'
+      },
+      {
+        id: 'r-rel2',
+        studentId: 'stu-other2',
+        type: 'far',
+        targetId: 'stu-mix',
+        strictness: 'hard'
+      },
+      // Noise: rule for a third party that should not count
+      {
+        id: 'r-other',
+        studentId: 'stu-other3',
+        type: 'front',
+        strictness: 'hard'
+      }
+    ];
+
+    expect(computeStudentDifficulty(student, rules)).toBe(43);
+  });
+
+  it('ignores rules with empty-string targetId (treats them as position rules)', () => {
+    const student: Student = { id: 'stu-e', name: 'E', specialNeeds: [] };
+    const rules: Rule[] = [
+      { id: 'r-pos', studentId: 'stu-e', type: 'front', strictness: 'hard', targetId: '' }
+    ];
+    // Empty-string targetId is treated as no target -> hard position rule -> 10.
+    expect(computeStudentDifficulty(student, rules)).toBe(10);
   });
 });

@@ -35,6 +35,44 @@ function getDistance(el1: { x: number; y: number }, el2: { x: number; y: number 
   return Math.sqrt(Math.pow(el1.x - el2.x, 2) + Math.pow(el1.y - el2.y, 2));
 }
 
+/**
+ * Heuristic per-student difficulty score (HEURISTIC_PLAN §6).
+ *
+ * Used by the greedy initial assignment (hardest students first) and by the
+ * SA scoring loop to weight per-student penalties. Higher = harder to place.
+ *
+ *   hardRuleCount  * 10  (position-only hard rules: front, near_door, ...)
+ *   softRuleCount  * 3   (same, soft)
+ *   specialNeedsCount * 6
+ *   relationCount  * 4   (any rule referencing this student that has a targetId)
+ */
+export function computeStudentDifficulty(student: Student, rules: Rule[]): number {
+  let hardRuleCount = 0;
+  let softRuleCount = 0;
+  let relationCount = 0;
+
+  rules.forEach((rule) => {
+    const isRelation = rule.targetId !== undefined && rule.targetId !== '';
+    if (isRelation) {
+      if (rule.studentId === student.id || rule.targetId === student.id) {
+        relationCount++;
+      }
+    } else if (rule.studentId === student.id) {
+      if (rule.strictness === 'hard') hardRuleCount++;
+      else softRuleCount++;
+    }
+  });
+
+  const specialNeedsCount = student.specialNeeds.length;
+
+  return (
+    hardRuleCount * 10 +
+    softRuleCount * 3 +
+    specialNeedsCount * 6 +
+    relationCount * 4
+  );
+}
+
 // Helper: Resolve a student name from an ID with graceful fallback.
 function resolveStudentName(students: Student[], studentId: string | undefined): string {
   if (!studentId) return 'Unbekannt';
@@ -714,8 +752,9 @@ export function evaluateSeating(
  *
  * Hard position rules (front/near_board/near_door/not_window) are not a
  * separate phase — they are baked into the per-desk score and so bias the
- * placement automatically. The difficulty heuristic is currently a stub
- * (`hardRuleCount*10 + softRuleCount*3`); the real one lands in Slice 4.
+ * placement automatically. Per-student ordering uses `computeStudentDifficulty`
+ * (HEURISTIC_PLAN §6) so the hardest-to-place students grab their preferred
+ * desks first.
  */
 export function greedyInitialAssignment(
   students: Student[],
@@ -724,18 +763,9 @@ export function greedyInitialAssignment(
   layout: ClassroomLayout,
   rng: RNG
 ): SeatingAssignment {
-  // SLICE 4: replace with computeStudentDifficulty()
   const difficulty = new Map<string, number>();
   students.forEach((student) => {
-    let hardRuleCount = 0;
-    let softRuleCount = 0;
-    rules.forEach((rule) => {
-      if (rule.studentId === student.id || rule.targetId === student.id) {
-        if (rule.strictness === 'hard') hardRuleCount++;
-        else softRuleCount++;
-      }
-    });
-    difficulty.set(student.id, hardRuleCount * 10 + softRuleCount * 3);
+    difficulty.set(student.id, computeStudentDifficulty(student, rules));
   });
 
   const sortedStudents = [...students].sort((a, b) => {
@@ -786,6 +816,44 @@ export function greedyInitialAssignment(
  * through the injected `rng` so behaviour is deterministic when a seeded
  * RNG is supplied.
  */
+/**
+ * Re-score an evaluation result so that each violation is amplified by the
+ * difficulty of the affected student. Used only by the SA decision loop —
+ * the user-facing `score` and `violations` stay the raw values produced by
+ * `evaluateSeating`.
+ *
+ * The raw `score` starts at 1000 and is decremented per violation. Since we
+ * don't track per-violation penalty here, we approximate the extra penalty
+ * as `(multiplier - 1) * baseWeight` where `baseWeight` matches the preset
+ * weights used in `evaluateSeating`. The exact weights don't have to match
+ * 1:1 — SA only cares about relative ordering of neighbouring states.
+ */
+function difficultyWeightedScore(
+  evaluation: { score: number; violations: SeatingViolation[] },
+  students: Student[],
+  rules: Rule[]
+): number {
+  // difficulty-weighted penalty multiplier — keeps /50 normalisation so a
+  // typical student (difficulty 0-75) yields a multiplier in [1.0, 2.5].
+  const studentDifficulty = new Map<string, number>();
+  students.forEach((s) => {
+    studentDifficulty.set(s.id, computeStudentDifficulty(s, rules));
+  });
+
+  let extraPenalty = 0;
+  for (const violation of evaluation.violations) {
+    if (!violation.studentId) continue;
+    const diff = studentDifficulty.get(violation.studentId) ?? 0;
+    const multiplier = 1 + diff / 50;
+    // Approximate per-violation base weight: hard ~ 500, soft ~ 50.
+    // (Matches the 'balanced' preset weights in evaluateSeating.)
+    const baseWeight = violation.type === 'hard' ? 500 : 50;
+    extraPenalty += (multiplier - 1) * baseWeight;
+  }
+
+  return evaluation.score - extraPenalty;
+}
+
 export function simulatedAnnealing(
   initialAssignment: SeatingAssignment,
   students: Student[],
@@ -798,8 +866,10 @@ export function simulatedAnnealing(
 
   let currentAssignments: SeatingAssignment = { ...initialAssignment };
   let currentEval = evaluateSeating(currentAssignments, students, rules, layout, preset);
+  let currentWeighted = difficultyWeightedScore(currentEval, students, rules);
   let bestAssignments = { ...currentAssignments };
   let bestEval = currentEval;
+  let bestWeighted = currentWeighted;
 
   let T = 100.0;
   const T_min = 0.1;
@@ -824,15 +894,18 @@ export function simulatedAnnealing(
       nextAssignments[d2Id] = temp;
 
       const nextEval = evaluateSeating(nextAssignments, students, rules, layout, preset);
-      const deltaE = nextEval.score - currentEval.score;
+      const nextWeighted = difficultyWeightedScore(nextEval, students, rules);
+      const deltaE = nextWeighted - currentWeighted;
 
       if (deltaE > 0 || rng() < Math.exp(deltaE / T)) {
         currentAssignments = nextAssignments;
         currentEval = nextEval;
+        currentWeighted = nextWeighted;
 
-        if (currentEval.score > bestEval.score) {
+        if (currentWeighted > bestWeighted) {
           bestAssignments = { ...currentAssignments };
           bestEval = currentEval;
+          bestWeighted = currentWeighted;
         }
       }
     }
