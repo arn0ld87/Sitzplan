@@ -10,6 +10,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import type { SchoolClass, ClassroomLayout, Student, Rule, SpecialNeed } from './types';
+import { useHistoryState } from './hooks/useHistoryState';
 import { Dashboard } from './components/Dashboard';
 import { StudentMgmt } from './components/StudentMgmt';
 import { RuleMgmt } from './components/RuleMgmt';
@@ -58,9 +59,11 @@ function App() {
   const [activeClassId, setActiveClassId] = useState<string>(
     INITIAL_CLASSES.data.length > 0 ? INITIAL_CLASSES.data[0].id : ''
   );
-  const [layout, setLayout] = useState<ClassroomLayout>(
+  const layoutHistory = useHistoryState<ClassroomLayout>(
     INITIAL_LAYOUT.data ?? DEFAULT_LAYOUT
   );
+  const layout = layoutHistory.value;
+  const setLayout = layoutHistory.set;
   const [activeTab, setActiveTab] = useState<'dashboard' | 'students' | 'rules' | 'room' | 'generator'>('dashboard');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') return 'light';
@@ -455,6 +458,10 @@ function App() {
             layout={layout}
             onUpdateLayout={handleUpdateLayout}
             studentCount={activeClass?.students.length ?? 0}
+            onUndo={layoutHistory.undo}
+            onRedo={layoutHistory.redo}
+            canUndo={layoutHistory.canUndo}
+            canRedo={layoutHistory.canRedo}
           />
         )}
 

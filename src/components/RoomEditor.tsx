@@ -6,7 +6,9 @@ import {
   Grid,
   Compass,
   Users,
-  AlertTriangle
+  AlertTriangle,
+  Undo2,
+  Redo2
 } from 'lucide-react';
 import type { ClassroomElement, ClassroomLayout, ElementType } from '../types';
 import { MOCK_CLASSROOM_LAYOUT } from '../utils/mockData';
@@ -18,6 +20,10 @@ interface RoomEditorProps {
   layout: ClassroomLayout;
   onUpdateLayout: (layout: ClassroomLayout) => void;
   studentCount?: number;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
 }
 
 const ELEMENT_CATALOG: { type: ElementType; label: string; w: number; h: number; color: string }[] = [
@@ -32,7 +38,11 @@ const ELEMENT_CATALOG: { type: ElementType; label: string; w: number; h: number;
 export const RoomEditor: React.FC<RoomEditorProps> = ({
   layout,
   onUpdateLayout,
-  studentCount = 0
+  studentCount = 0,
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false
 }) => {
   const deskCount = countDesks(layout);
   const overCapacity = studentCount > deskCount;
@@ -280,6 +290,30 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
             </h3>
 
             <div style={{ display: 'flex', gap: '0.5rem' }}>
+              {onUndo && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={onUndo}
+                  disabled={!canUndo}
+                  title="Rückgängig"
+                  aria-label="Letzte Änderung rückgängig machen"
+                >
+                  <Undo2 size={14} />
+                </button>
+              )}
+              {onRedo && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={onRedo}
+                  disabled={!canRedo}
+                  title="Wiederherstellen"
+                  aria-label="Letzte Änderung wiederherstellen"
+                >
+                  <Redo2 size={14} />
+                </button>
+              )}
               <button className="btn btn-secondary btn-sm" onClick={handleLoadStandardDesks}>
                 Standard-Layout laden
               </button>
