@@ -1052,6 +1052,45 @@ textarea.form-input {
 }
 
 /* =============================================================
+   Room Collision – M3 Slice 2
+   ============================================================= */
+
+.room-capacity-stat.is-collision {
+  color: var(--danger);
+}
+
+.room-capacity-stat.is-collision strong {
+  color: var(--danger);
+}
+
+.classroom-svg-element .svg-desk.is-colliding,
+.classroom-svg-element .svg-board.is-colliding,
+.classroom-svg-element .svg-window.is-colliding,
+.classroom-svg-element .svg-door.is-colliding,
+.classroom-svg-element .svg-cupboard.is-colliding,
+.classroom-svg-element .svg-furniture.is-colliding {
+  stroke: var(--danger);
+  stroke-width: 2.5;
+  stroke-dasharray: 5 3;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .classroom-svg-element .svg-desk.is-colliding,
+  .classroom-svg-element .svg-board.is-colliding,
+  .classroom-svg-element .svg-window.is-colliding,
+  .classroom-svg-element .svg-door.is-colliding,
+  .classroom-svg-element .svg-cupboard.is-colliding,
+  .classroom-svg-element .svg-furniture.is-colliding {
+    animation: collision-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes collision-pulse {
+  0%, 100% { stroke-opacity: 1; }
+  50%      { stroke-opacity: 0.45; }
+}
+
+/* =============================================================
    Motion – Reduced
    ============================================================= */
 

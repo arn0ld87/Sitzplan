@@ -12,6 +12,7 @@ import type { ClassroomElement, ClassroomLayout, ElementType } from '../types';
 import { MOCK_CLASSROOM_LAYOUT } from '../utils/mockData';
 import { newId } from '../utils/ids';
 import { countDesks } from '../utils/layoutCapacity';
+import { findOverlappingIds, wouldOverlap } from '../utils/layoutCollision';
 
 interface RoomEditorProps {
   layout: ClassroomLayout;
@@ -36,6 +37,8 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
   const deskCount = countDesks(layout);
   const overCapacity = studentCount > deskCount;
   const deficit = overCapacity ? studentCount - deskCount : 0;
+  const collidingIds = findOverlappingIds(layout);
+  const collisionCount = collidingIds.size;
   const [selectedTool, setSelectedTool] = useState<ElementType | 'select'>('select');
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   
@@ -61,25 +64,10 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
     onUpdateLayout({ ...layout, height: newHeight });
   };
 
-  // Check if position overlaps existing element
-  const checkOverlap = (el: Omit<ClassroomElement, 'id'>, ignoreId?: string): boolean => {
-    return layout.elements.some((other) => {
-      if (other.id === ignoreId) return false;
-      
-      // Determine bounding boxes considering size w and h
-      const elRight = el.x + el.w;
-      const elBottom = el.y + el.h;
-      const otherRight = other.x + other.w;
-      const otherBottom = other.y + other.h;
-
-      return !(
-        el.x >= otherRight ||
-        elRight <= other.x ||
-        el.y >= otherBottom ||
-        elBottom <= other.y
-      );
-    });
-  };
+  const checkOverlap = (
+    el: Pick<ClassroomElement, 'x' | 'y' | 'w' | 'h'>,
+    ignoreId?: string
+  ): boolean => wouldOverlap(layout, el, ignoreId);
 
   // Add Element on Grid Click
   const handleGridClick = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -302,7 +290,7 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
           </div>
 
           <div
-            className={`room-capacity-stats ${overCapacity ? 'is-over' : ''}`}
+            className={`room-capacity-stats ${overCapacity || collisionCount > 0 ? 'is-over' : ''}`}
             role="status"
             aria-live="polite"
           >
@@ -314,6 +302,12 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
               <Users size={14} aria-hidden="true" />
               <strong>{studentCount}</strong> {studentCount === 1 ? 'Schüler:in' : 'Schüler:innen'}
             </span>
+            {collisionCount > 0 && (
+              <span className="room-capacity-stat is-collision">
+                <AlertTriangle size={14} aria-hidden="true" />
+                <strong>{collisionCount}</strong> {collisionCount === 1 ? 'Kollision' : 'Kollisionen'}
+              </span>
+            )}
           </div>
 
           {overCapacity && (
@@ -360,6 +354,7 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
               {/* Placed Elements */}
               {layout.elements.map((el) => {
                 const isSelected = selectedElementId === el.id;
+                const isColliding = collidingIds.has(el.id);
                 const radius = 6;
                 const px = el.x * cellSize + 2;
                 const py = el.y * cellSize + 2;
@@ -376,7 +371,7 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
                 return (
                   <g
                     key={el.id}
-                    className="classroom-svg-element"
+                    className={`classroom-svg-element ${isColliding ? 'is-colliding' : ''}`}
                     onPointerDown={(e) => handlePointerDown(e, el)}
                     onPointerMove={(e) => handlePointerMove(e, el.id)}
                     onPointerUp={handlePointerUp}
@@ -384,7 +379,7 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
                   >
                     {/* Bounding shape */}
                     <rect
-                      className={`${colorClass} ${isSelected ? 'selected' : ''}`}
+                      className={`${colorClass} ${isSelected ? 'selected' : ''} ${isColliding ? 'is-colliding' : ''}`}
                       x={px}
                       y={py}
                       width={pw}

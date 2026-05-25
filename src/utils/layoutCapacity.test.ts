@@ -17,8 +17,6 @@ function makeElement(type: ClassroomElement['type'], i: number): ClassroomElemen
 
 function makeLayout(elements: ClassroomElement[]): ClassroomLayout {
   return {
-    id: 'l1',
-    name: 'Test',
     width: 10,
     height: 6,
     elements
