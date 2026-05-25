@@ -340,3 +340,401 @@ describe('evaluateSeating -- special-needs implicit rules', () => {
     expect(violations.some((v) => v.id.startsWith('need-seh-'))).toBe(false);
   });
 });
+
+describe('Slice 5 -- German violation descriptions per kind', () => {
+  it('Sehschwäche description names the student and front-row keyword', () => {
+    const students = [
+      { id: 'stu-anna', name: 'Anna', specialNeeds: ['Sehschwäche' as const] }
+    ];
+    const assignment: SeatingAssignment = { 'desk-c': 'stu-anna' };
+    const { violations } = evaluateSeating(assignment, students, [], SMALL_LAYOUT, 'balanced');
+    const v = violations.find((vv) => vv.id.startsWith('need-seh-'));
+    expect(v?.description).toContain('Anna');
+    expect(v?.description.toLowerCase()).toContain('sehschwäche');
+  });
+
+  it('Hörschwäche description names the student and mentions Tafel/vorne', () => {
+    const students = [
+      { id: 'stu-ben', name: 'Ben', specialNeeds: ['Hörschwäche' as const] }
+    ];
+    const assignment: SeatingAssignment = { 'desk-c': 'stu-ben' };
+    const { violations } = evaluateSeating(assignment, students, [], SMALL_LAYOUT, 'balanced');
+    const v = violations.find((vv) => vv.id.startsWith('need-hoer-'));
+    expect(v?.description).toContain('Ben');
+    expect(v?.description.toLowerCase()).toMatch(/tafel|vorne/);
+  });
+
+  it('Barrierefreiheit description names the student and mentions Tür/Rand', () => {
+    const students = [
+      { id: 'stu-c', name: 'Carla', specialNeeds: ['Barrierefreiheit' as const] }
+    ];
+    // Layout with a clear non-edge, far-from-door desk for Carla.
+    const layout: ClassroomLayout = {
+      width: 8,
+      height: 8,
+      elements: [
+        { id: 'board-b', type: 'board', x: 3, y: 0, w: 2, h: 1, rotation: 0 },
+        { id: 'door-b', type: 'door', x: 7, y: 7, w: 1, h: 1, rotation: 0 },
+        { id: 'desk-left', type: 'desk', x: 1, y: 3, w: 1, h: 1, rotation: 0 },
+        { id: 'desk-mid', type: 'desk', x: 3, y: 3, w: 1, h: 1, rotation: 0 },
+        { id: 'desk-right', type: 'desk', x: 5, y: 3, w: 1, h: 1, rotation: 0 }
+      ]
+    };
+    const assignment: SeatingAssignment = { 'desk-mid': 'stu-c' };
+    const { violations } = evaluateSeating(assignment, students, [], layout, 'balanced');
+    const v = violations.find((vv) => vv.id.startsWith('need-barr-'));
+    expect(v?.description).toContain('Carla');
+    expect(v?.description.toLowerCase()).toMatch(/tür|rand/);
+  });
+
+  it('Konzentrationsbedarf description names the student and mentions Fenster/Tür', () => {
+    const students = [
+      { id: 'stu-d', name: 'Dana', specialNeeds: ['Konzentrationsbedarf' as const] }
+    ];
+    // desk-a is at x=3, y=3; window-1 sits at x=0, y=3 — distance >1.8 so no
+    // implicit violation. Use door-adjacent position instead: desk-d (x=4,y=5)
+    // vs door-1 (x=7,y=6) — distance ~3.16 — still not <=2.0. Force window
+    // proximity by moving the student onto a window-adjacent layout.
+    const layout: ClassroomLayout = {
+      width: 5,
+      height: 5,
+      elements: [
+        { id: 'board-k', type: 'board', x: 1, y: 0, w: 2, h: 1, rotation: 0 },
+        { id: 'window-k', type: 'window', x: 0, y: 2, w: 1, h: 1, rotation: 90 },
+        { id: 'desk-near-window', type: 'desk', x: 1, y: 2, w: 1, h: 1, rotation: 0 }
+      ]
+    };
+    const assignment: SeatingAssignment = { 'desk-near-window': 'stu-d' };
+    const { violations } = evaluateSeating(assignment, students, [], layout, 'balanced');
+    const v = violations.find((vv) => vv.id.startsWith('need-konz-'));
+    expect(v?.description).toContain('Dana');
+    expect(v?.description.toLowerCase()).toMatch(/fenster|tür/);
+  });
+
+  it('Verhalten description names both students and mentions nebeneinander', () => {
+    const students = [
+      { id: 'stu-anna', name: 'Anna', specialNeeds: ['Verhalten' as const] },
+      { id: 'stu-ben', name: 'Ben', specialNeeds: ['Verhalten' as const] }
+    ];
+    // desk-a and desk-b are adjacent in SMALL_LAYOUT.
+    const assignment: SeatingAssignment = {
+      'desk-a': 'stu-anna',
+      'desk-b': 'stu-ben'
+    };
+    const { violations } = evaluateSeating(assignment, students, [], SMALL_LAYOUT, 'balanced');
+    const v = violations.find((vv) => vv.id.startsWith('need-verh-'));
+    expect(v?.description).toContain('Anna');
+    expect(v?.description).toContain('Ben');
+    expect(v?.description.toLowerCase()).toContain('nebeneinander');
+  });
+
+  it('not_beside rule description names both students and mentions nebeneinander', () => {
+    const rules: Rule[] = [
+      {
+        id: 'rule-nb',
+        studentId: 'stu-anna',
+        type: 'not_beside',
+        targetId: 'stu-ben',
+        strictness: 'hard'
+      }
+    ];
+    const assignment: SeatingAssignment = {
+      'desk-a': 'stu-anna',
+      'desk-b': 'stu-ben',
+      'desk-c': 'stu-clara',
+      'desk-d': 'stu-david'
+    };
+    const { violations } = evaluateSeating(assignment, SMALL_STUDENTS, rules, SMALL_LAYOUT, 'balanced');
+    const v = violations.find((vv) => vv.ruleId === 'rule-nb');
+    expect(v?.description).toContain('Anna');
+    expect(v?.description).toContain('Ben');
+    expect(v?.description.toLowerCase()).toContain('nebeneinander');
+  });
+
+  it('beside rule description names both students and mentions neben', () => {
+    const rules: Rule[] = [
+      {
+        id: 'rule-bs',
+        studentId: 'stu-anna',
+        type: 'beside',
+        targetId: 'stu-ben',
+        strictness: 'hard'
+      }
+    ];
+    const assignment: SeatingAssignment = {
+      'desk-a': 'stu-anna',
+      'desk-d': 'stu-ben',
+      'desk-b': 'stu-clara',
+      'desk-c': 'stu-david'
+    };
+    const { violations } = evaluateSeating(assignment, SMALL_STUDENTS, rules, SMALL_LAYOUT, 'balanced');
+    const v = violations.find((vv) => vv.ruleId === 'rule-bs');
+    expect(v?.description).toContain('Anna');
+    expect(v?.description).toContain('Ben');
+    expect(v?.description.toLowerCase()).toContain('neben');
+  });
+
+  it('near rule description names both students and mentions Felder distance', () => {
+    const rules: Rule[] = [
+      {
+        id: 'rule-near',
+        studentId: 'stu-anna',
+        type: 'near',
+        targetId: 'stu-ben',
+        strictness: 'hard'
+      }
+    ];
+    // Bigger layout so Anna and Ben can sit clearly > 2.5 cells apart.
+    const layout: ClassroomLayout = {
+      width: 10,
+      height: 10,
+      elements: [
+        { id: 'board-n', type: 'board', x: 4, y: 0, w: 2, h: 1, rotation: 0 },
+        { id: 'desk-far-1', type: 'desk', x: 1, y: 2, w: 1, h: 1, rotation: 0 },
+        { id: 'desk-far-2', type: 'desk', x: 8, y: 7, w: 1, h: 1, rotation: 0 }
+      ]
+    };
+    const assignment: SeatingAssignment = {
+      'desk-far-1': 'stu-anna',
+      'desk-far-2': 'stu-ben'
+    };
+    const { violations } = evaluateSeating(
+      assignment,
+      [
+        { id: 'stu-anna', name: 'Anna', specialNeeds: [] },
+        { id: 'stu-ben', name: 'Ben', specialNeeds: [] }
+      ],
+      rules,
+      layout,
+      'balanced'
+    );
+    const v = violations.find((vv) => vv.ruleId === 'rule-near');
+    expect(v?.description).toContain('Anna');
+    expect(v?.description).toContain('Ben');
+    expect(v?.description.toLowerCase()).toMatch(/nahe|entfernt/);
+  });
+
+  it('far rule description names both students and mentions weit weg', () => {
+    const rules: Rule[] = [
+      {
+        id: 'rule-far',
+        studentId: 'stu-anna',
+        type: 'far',
+        targetId: 'stu-ben',
+        strictness: 'hard'
+      }
+    ];
+    const assignment: SeatingAssignment = {
+      'desk-a': 'stu-anna',
+      'desk-b': 'stu-ben',
+      'desk-c': 'stu-clara',
+      'desk-d': 'stu-david'
+    };
+    const { violations } = evaluateSeating(assignment, SMALL_STUDENTS, rules, SMALL_LAYOUT, 'balanced');
+    const v = violations.find((vv) => vv.ruleId === 'rule-far');
+    expect(v?.description).toContain('Anna');
+    expect(v?.description).toContain('Ben');
+    expect(v?.description.toLowerCase()).toContain('weit weg');
+  });
+
+  it('front rule description names the student and mentions Reihe', () => {
+    const rules: Rule[] = [
+      {
+        id: 'rule-front',
+        studentId: 'stu-anna',
+        type: 'front',
+        strictness: 'hard'
+      }
+    ];
+    const assignment: SeatingAssignment = {
+      'desk-c': 'stu-anna',
+      'desk-d': 'stu-ben',
+      'desk-a': 'stu-clara',
+      'desk-b': 'stu-david'
+    };
+    const { violations } = evaluateSeating(assignment, SMALL_STUDENTS, rules, SMALL_LAYOUT, 'balanced');
+    const v = violations.find((vv) => vv.ruleId === 'rule-front');
+    expect(v?.description).toContain('Anna');
+    expect(v?.description.toLowerCase()).toContain('reihe');
+  });
+
+  it('back rule description names the student and mentions Reihe', () => {
+    const rules: Rule[] = [
+      {
+        id: 'rule-back',
+        studentId: 'stu-anna',
+        type: 'back',
+        strictness: 'hard'
+      }
+    ];
+    const assignment: SeatingAssignment = {
+      'desk-a': 'stu-anna',
+      'desk-b': 'stu-ben',
+      'desk-c': 'stu-clara',
+      'desk-d': 'stu-david'
+    };
+    const { violations } = evaluateSeating(assignment, SMALL_STUDENTS, rules, SMALL_LAYOUT, 'balanced');
+    const v = violations.find((vv) => vv.ruleId === 'rule-back');
+    expect(v?.description).toContain('Anna');
+    expect(v?.description.toLowerCase()).toContain('reihe');
+  });
+
+  it('edge rule description names the student and mentions Rand', () => {
+    // Build a 3x3 desk grid so desk-mid is strictly interior (not on any edge).
+    const layout: ClassroomLayout = {
+      width: 6,
+      height: 6,
+      elements: [
+        { id: 'board-e', type: 'board', x: 2, y: 0, w: 2, h: 1, rotation: 0 },
+        { id: 'desk-tl', type: 'desk', x: 0, y: 1, w: 1, h: 1, rotation: 0 },
+        { id: 'desk-tm', type: 'desk', x: 2, y: 1, w: 1, h: 1, rotation: 0 },
+        { id: 'desk-tr', type: 'desk', x: 5, y: 1, w: 1, h: 1, rotation: 0 },
+        { id: 'desk-ml', type: 'desk', x: 0, y: 3, w: 1, h: 1, rotation: 0 },
+        { id: 'desk-mid', type: 'desk', x: 2, y: 3, w: 1, h: 1, rotation: 0 },
+        { id: 'desk-mr', type: 'desk', x: 5, y: 3, w: 1, h: 1, rotation: 0 },
+        { id: 'desk-bl', type: 'desk', x: 0, y: 5, w: 1, h: 1, rotation: 0 },
+        { id: 'desk-bm', type: 'desk', x: 2, y: 5, w: 1, h: 1, rotation: 0 },
+        { id: 'desk-br', type: 'desk', x: 5, y: 5, w: 1, h: 1, rotation: 0 }
+      ]
+    };
+    const rules: Rule[] = [
+      { id: 'rule-edge', studentId: 'stu-anna', type: 'edge', strictness: 'hard' }
+    ];
+    const assignment: SeatingAssignment = { 'desk-mid': 'stu-anna' };
+    const { violations } = evaluateSeating(
+      assignment,
+      [{ id: 'stu-anna', name: 'Anna', specialNeeds: [] }],
+      rules,
+      layout,
+      'balanced'
+    );
+    const v = violations.find((vv) => vv.ruleId === 'rule-edge');
+    expect(v?.description).toContain('Anna');
+    expect(v?.description.toLowerCase()).toContain('rand');
+  });
+
+  it('near_door rule description names the student and mentions Tür', () => {
+    const rules: Rule[] = [
+      { id: 'rule-door', studentId: 'stu-anna', type: 'near_door', strictness: 'hard' }
+    ];
+    // desk-a (3,3) vs door-1 (7,6) ~ 5 — too far.
+    const assignment: SeatingAssignment = { 'desk-a': 'stu-anna' };
+    const { violations } = evaluateSeating(
+      assignment,
+      [{ id: 'stu-anna', name: 'Anna', specialNeeds: [] }],
+      rules,
+      SMALL_LAYOUT,
+      'balanced'
+    );
+    const v = violations.find((vv) => vv.ruleId === 'rule-door');
+    expect(v?.description).toContain('Anna');
+    expect(v?.description.toLowerCase()).toContain('tür');
+  });
+
+  it('near_board rule description names the student and mentions Tafel', () => {
+    const rules: Rule[] = [
+      { id: 'rule-board', studentId: 'stu-anna', type: 'near_board', strictness: 'hard' }
+    ];
+    // desk-c (3,5) vs board-1 (3,0) ~ 5 — too far.
+    const assignment: SeatingAssignment = { 'desk-c': 'stu-anna' };
+    const { violations } = evaluateSeating(
+      assignment,
+      [{ id: 'stu-anna', name: 'Anna', specialNeeds: [] }],
+      rules,
+      SMALL_LAYOUT,
+      'balanced'
+    );
+    const v = violations.find((vv) => vv.ruleId === 'rule-board');
+    expect(v?.description).toContain('Anna');
+    expect(v?.description.toLowerCase()).toContain('tafel');
+  });
+
+  it('not_window rule description names the student and mentions Fenster', () => {
+    // Build a layout where desk is directly window-adjacent.
+    const layout: ClassroomLayout = {
+      width: 5,
+      height: 5,
+      elements: [
+        { id: 'board-w', type: 'board', x: 1, y: 0, w: 2, h: 1, rotation: 0 },
+        { id: 'window-w', type: 'window', x: 0, y: 2, w: 1, h: 1, rotation: 90 },
+        { id: 'desk-near-window', type: 'desk', x: 1, y: 2, w: 1, h: 1, rotation: 0 }
+      ]
+    };
+    const rules: Rule[] = [
+      { id: 'rule-window', studentId: 'stu-anna', type: 'not_window', strictness: 'hard' }
+    ];
+    const assignment: SeatingAssignment = { 'desk-near-window': 'stu-anna' };
+    const { violations } = evaluateSeating(
+      assignment,
+      [{ id: 'stu-anna', name: 'Anna', specialNeeds: [] }],
+      rules,
+      layout,
+      'balanced'
+    );
+    const v = violations.find((vv) => vv.ruleId === 'rule-window');
+    expect(v?.description).toContain('Anna');
+    expect(v?.description.toLowerCase()).toContain('fenster');
+  });
+
+  it('falls back to the studentId when the student is not in the array', () => {
+    const rules: Rule[] = [
+      {
+        id: 'rule-orphan',
+        studentId: 'stu-anna',
+        type: 'beside',
+        targetId: 'stu-ghost', // not in SMALL_STUDENTS
+        strictness: 'hard'
+      }
+    ];
+    // Manually craft an assignment that has both students placed, even though
+    // stu-ghost is not in the students array — solver should still describe
+    // the violation without crashing.
+    const studentsPlus = [
+      ...SMALL_STUDENTS,
+      { id: 'stu-ghost', name: '', specialNeeds: [] }
+    ];
+    const assignment: SeatingAssignment = {
+      'desk-a': 'stu-anna',
+      'desk-d': 'stu-ghost',
+      'desk-b': 'stu-clara',
+      'desk-c': 'stu-david'
+    };
+    const { violations } = evaluateSeating(assignment, studentsPlus, rules, SMALL_LAYOUT, 'balanced');
+    const v = violations.find((vv) => vv.ruleId === 'rule-orphan');
+    // Falls back to the ID string when name is empty.
+    expect(v?.description).toContain('stu-ghost');
+  });
+});
+
+describe('Slice 5 -- explanation 3-line summary structure', () => {
+  it('contains Ziel:, Erreicht: and Offen: in that order', () => {
+    const proposal = generateSeatingPlan(SMALL_STUDENTS, [], SMALL_LAYOUT, 'balanced');
+    const text = proposal.explanation;
+
+    const zielIdx = text.indexOf('Ziel:');
+    const erreichtIdx = text.indexOf('Erreicht:');
+    const offenIdx = text.indexOf('Offen:');
+
+    expect(zielIdx).toBeGreaterThanOrEqual(0);
+    expect(erreichtIdx).toBeGreaterThan(zielIdx);
+    expect(offenIdx).toBeGreaterThan(erreichtIdx);
+
+    // Three lines joined by newlines.
+    expect(text.split('\n')).toHaveLength(3);
+  });
+
+  it('reports "keine relevanten Wünsche unerfüllt" when no violations exist', () => {
+    const proposal = generateSeatingPlan(SMALL_STUDENTS, [], SMALL_LAYOUT, 'balanced');
+    if (proposal.violations.length === 0) {
+      expect(proposal.explanation).toContain('keine relevanten Wünsche unerfüllt');
+    }
+  });
+
+  it('uses preset-specific Ziel line for focus and friendship', () => {
+    const focus = generateSeatingPlan(SMALL_STUDENTS, [], SMALL_LAYOUT, 'focus');
+    expect(focus.explanation.toLowerCase()).toContain('fokus');
+
+    const friend = generateSeatingPlan(SMALL_STUDENTS, [], SMALL_LAYOUT, 'friendship');
+    expect(friend.explanation.toLowerCase()).toContain('freundschaft');
+  });
+});

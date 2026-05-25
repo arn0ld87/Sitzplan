@@ -751,7 +751,8 @@ export const Generator: React.FC<GeneratorProps> = ({
                         fontSize: '0.95rem',
                         lineHeight: 1.4,
                         marginBottom: '1.25rem',
-                        borderLeft: '4px solid var(--primary)'
+                        borderLeft: '4px solid var(--primary)',
+                        whiteSpace: 'pre-line'
                       }}
                     >
                       {activeProposal.explanation}
