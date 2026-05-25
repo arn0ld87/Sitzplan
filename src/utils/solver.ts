@@ -758,17 +758,30 @@ export function evaluateSeating(
  * (HEURISTIC_PLAN §6) so the hardest-to-place students grab their preferred
  * desks first.
  */
+/**
+ * Pre-compute per-student difficulty once for a (students, rules) pair so
+ * the SA hot path (~40 000 iterations on the 35/30 fixture) doesn't rebuild
+ * the map on every call. Exported so callers can pass it explicitly when
+ * they call `simulatedAnnealing` or `greedyInitialAssignment` directly.
+ */
+export function computeDifficultyMap(students: Student[], rules: Rule[]): Map<string, number> {
+  const map = new Map<string, number>();
+  students.forEach((student) => {
+    map.set(student.id, computeStudentDifficulty(student, rules));
+  });
+  return map;
+}
+
 export function greedyInitialAssignment(
   students: Student[],
   desks: ClassroomElement[],
   rules: Rule[],
   layout: ClassroomLayout,
-  rng: RNG
+  rng: RNG,
+  preset: Preset = 'balanced',
+  difficultyMap?: Map<string, number>
 ): SeatingAssignment {
-  const difficulty = new Map<string, number>();
-  students.forEach((student) => {
-    difficulty.set(student.id, computeStudentDifficulty(student, rules));
-  });
+  const difficulty = difficultyMap ?? computeDifficultyMap(students, rules);
 
   const sortedStudents = [...students].sort((a, b) => {
     const diff = (difficulty.get(b.id) ?? 0) - (difficulty.get(a.id) ?? 0);
@@ -788,12 +801,13 @@ export function greedyInitialAssignment(
     if (freeDeskIds.size === 0) break;
 
     // Score every still-free desk by placing the student there tentatively.
+    // Use the target preset so e.g. focus-mode behaviour weights bias placement.
     let bestScore = -Infinity;
     let bestDeskIds: string[] = [];
 
     for (const deskId of freeDeskIds) {
       assignments[deskId] = student.id;
-      const { score } = evaluateSeating(assignments, students, rules, layout, 'balanced');
+      const { score } = evaluateSeating(assignments, students, rules, layout, preset);
       assignments[deskId] = '';
 
       if (score > bestScore) {
@@ -832,20 +846,14 @@ export function greedyInitialAssignment(
  */
 function difficultyWeightedScore(
   evaluation: { score: number; violations: SeatingViolation[] },
-  students: Student[],
-  rules: Rule[]
+  difficultyMap: Map<string, number>
 ): number {
   // difficulty-weighted penalty multiplier — keeps /50 normalisation so a
   // typical student (difficulty 0-75) yields a multiplier in [1.0, 2.5].
-  const studentDifficulty = new Map<string, number>();
-  students.forEach((s) => {
-    studentDifficulty.set(s.id, computeStudentDifficulty(s, rules));
-  });
-
   let extraPenalty = 0;
   for (const violation of evaluation.violations) {
     if (!violation.studentId) continue;
-    const diff = studentDifficulty.get(violation.studentId) ?? 0;
+    const diff = difficultyMap.get(violation.studentId) ?? 0;
     const multiplier = 1 + diff / 50;
     // Approximate per-violation base weight: hard ~ 500, soft ~ 50.
     // (Matches the 'balanced' preset weights in evaluateSeating.)
@@ -862,13 +870,17 @@ export function simulatedAnnealing(
   rules: Rule[],
   layout: ClassroomLayout,
   rng: RNG,
-  preset: Preset
+  preset: Preset,
+  difficultyMap?: Map<string, number>
 ): { assignments: SeatingAssignment; score: number; violations: SeatingViolation[] } {
   const desks = layout.elements.filter((el) => el.type === 'desk');
+  // Cache the per-student difficulty once. Building it inside the loop body
+  // dominated profile time before (Gemini PR #14: ~40k rebuilds per pass).
+  const diffMap = difficultyMap ?? computeDifficultyMap(students, rules);
 
   let currentAssignments: SeatingAssignment = { ...initialAssignment };
   let currentEval = evaluateSeating(currentAssignments, students, rules, layout, preset);
-  let currentWeighted = difficultyWeightedScore(currentEval, students, rules);
+  let currentWeighted = difficultyWeightedScore(currentEval, diffMap);
   let bestAssignments = { ...currentAssignments };
   let bestEval = currentEval;
   let bestWeighted = currentWeighted;
@@ -902,7 +914,7 @@ export function simulatedAnnealing(
       nextAssignments[d2Id] = temp;
 
       const nextEval = evaluateSeating(nextAssignments, students, rules, layout, preset);
-      const nextWeighted = difficultyWeightedScore(nextEval, students, rules);
+      const nextWeighted = difficultyWeightedScore(nextEval, diffMap);
       const deltaE = nextWeighted - currentWeighted;
 
       if (deltaE > 0 || rng() < Math.exp(deltaE / T)) {
@@ -970,11 +982,13 @@ function runHybridPass(
   rules: Rule[],
   layout: ClassroomLayout,
   preset: Preset,
-  rng: RNG
+  rng: RNG,
+  difficultyMap?: Map<string, number>
 ): { assignments: SeatingAssignment; score: number; violations: SeatingViolation[] } {
   const desks = layout.elements.filter((el) => el.type === 'desk');
-  const initial = greedyInitialAssignment(students, desks, rules, layout, rng);
-  return simulatedAnnealing(initial, students, rules, layout, rng, preset);
+  const diffMap = difficultyMap ?? computeDifficultyMap(students, rules);
+  const initial = greedyInitialAssignment(students, desks, rules, layout, rng, preset, diffMap);
+  return simulatedAnnealing(initial, students, rules, layout, rng, preset, diffMap);
 }
 
 /**
@@ -995,7 +1009,8 @@ export function generateSeatingPlan(
   }
 
   const rng = defaultRng();
-  const result = runHybridPass(students, rules, layout, preset, rng);
+  const diffMap = computeDifficultyMap(students, rules);
+  const result = runHybridPass(students, rules, layout, preset, rng, diffMap);
   return buildProposal(preset, result.assignments, result.score, result.violations, students, rules, layout);
 }
 
@@ -1023,9 +1038,12 @@ export function generateSeatingProposals(
   }
 
   const masterRng: RNG = opts?.seed !== undefined ? mulberry32(opts.seed) : defaultRng();
+  // PR #14 review (Gemini, HIGH): compute difficulty map once and reuse it
+  // across all 18 hybrid passes — was rebuilt ~40 000 times per SA pass.
+  const difficultyMap = computeDifficultyMap(students, rules);
 
   // Slice 7: keep candidates lightweight (no `buildProposal`/diagnostics yet)
-  // — 12 candidates only become 3 finalists after dedup, and the full
+  // — 18 candidates only become 3 finalists after dedup, and the full
   // SeatingProposal incl. analyzeSeatingDiagnostics is expensive on the
   // 35-student fixture. We build it for the picked 3 only.
   const rawCandidates: RawCandidate[] = [];
@@ -1036,7 +1054,7 @@ export function generateSeatingProposals(
       // diverge but the whole run stays deterministic for a given seed.
       const restartSeed = Math.floor(masterRng() * 0xffffffff);
       const restartRng = mulberry32(restartSeed);
-      const result = runHybridPass(students, rules, layout, preset, restartRng);
+      const result = runHybridPass(students, rules, layout, preset, restartRng, difficultyMap);
       rawCandidates.push({
         preset,
         assignments: result.assignments,
