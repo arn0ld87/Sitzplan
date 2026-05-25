@@ -16,6 +16,7 @@ import { newId } from '../utils/ids';
 import { countDesks } from '../utils/layoutCapacity';
 import { findOverlappingIds, wouldOverlap } from '../utils/layoutCollision';
 import { getKeyboardAction, isEditableTarget } from '../utils/editorKeymap';
+import { EmptyState } from './EmptyState';
 
 interface RoomEditorProps {
   layout: ClassroomLayout;
@@ -401,6 +402,16 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
                 Füge weitere Schülerpulte hinzu oder reduziere die Klassengröße.
               </span>
             </div>
+          )}
+
+          {layout.elements.length === 0 && (
+            <EmptyState
+              icon={Grid}
+              size="sm"
+              title="Noch leerer Raum"
+              description="Wähle rechts ein Objekt aus dem Katalog und klicke ins Raster, um es zu platzieren — oder lade das Standard-Layout."
+              action={{ label: 'Standard-Layout laden', onClick: handleLoadStandardDesks }}
+            />
           )}
 
           <div className="grid-viewport">
