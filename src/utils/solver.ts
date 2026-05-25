@@ -15,6 +15,135 @@ function getDistance(el1: { x: number; y: number }, el2: { x: number; y: number 
   return Math.sqrt(Math.pow(el1.x - el2.x, 2) + Math.pow(el1.y - el2.y, 2));
 }
 
+// Helper: Resolve a student name from an ID with graceful fallback.
+function resolveStudentName(students: Student[], studentId: string | undefined): string {
+  if (!studentId) return 'Unbekannt';
+  const student = students.find((s) => s.id === studentId);
+  return student?.name || studentId;
+}
+
+// Discriminated union for the violation kinds emitted by evaluateSeating.
+// Used as input to formatViolationDescription so the message stays consistent
+// per rule (student name + concrete rule wording in German).
+type ViolationKind =
+  | { kind: 'need-seh' }
+  | { kind: 'need-hoer' }
+  | { kind: 'need-barr' }
+  | { kind: 'need-konz' }
+  | { kind: 'need-verh'; otherStudentId: string }
+  | { kind: 'beside'; targetStudentId: string }
+  | { kind: 'not_beside'; targetStudentId: string }
+  | { kind: 'near'; targetStudentId: string; distanceCells: number }
+  | { kind: 'far'; targetStudentId: string; distanceCells: number }
+  | { kind: 'front'; row: number }
+  | { kind: 'back'; row: number }
+  | { kind: 'edge' }
+  | { kind: 'near_door' }
+  | { kind: 'near_board' }
+  | { kind: 'not_window' };
+
+function formatViolationDescription(
+  students: Student[],
+  studentId: string,
+  detail: ViolationKind
+): string {
+  const name = resolveStudentName(students, studentId);
+
+  switch (detail.kind) {
+    case 'need-seh':
+      return `${name} hat Sehschwäche und benötigt einen Platz in vorderster Reihe nahe der Tafel.`;
+    case 'need-hoer':
+      return `${name} hat Hörschwäche und sollte vorne oder direkt bei der Tafel sitzen.`;
+    case 'need-barr':
+      return `${name} braucht einen barrierefreien Platz nahe der Tür oder am Rand.`;
+    case 'need-konz':
+      return `${name} braucht Konzentration und sollte nicht direkt am Fenster oder an der Tür sitzen.`;
+    case 'need-verh': {
+      const other = resolveStudentName(students, detail.otherStudentId);
+      return `${name} und ${other} sitzen nebeneinander, obwohl beide erhöhten Verhaltenbedarf haben.`;
+    }
+    case 'beside': {
+      const target = resolveStudentName(students, detail.targetStudentId);
+      return `${name} soll neben ${target} sitzen, ist aber nicht direkt daneben platziert.`;
+    }
+    case 'not_beside': {
+      const target = resolveStudentName(students, detail.targetStudentId);
+      return `${name} und ${target} sitzen nebeneinander, obwohl die Regel das verbietet.`;
+    }
+    case 'near': {
+      const target = resolveStudentName(students, detail.targetStudentId);
+      const rounded = Math.round(detail.distanceCells * 10) / 10;
+      return `${name} soll nahe bei ${target} sitzen, ist aber ${rounded} Felder entfernt.`;
+    }
+    case 'far': {
+      const target = resolveStudentName(students, detail.targetStudentId);
+      const rounded = Math.round(detail.distanceCells * 10) / 10;
+      return `${name} soll weit weg von ${target} sitzen, ist aber nur ${rounded} Felder entfernt.`;
+    }
+    case 'front':
+      return `${name} soll im vorderen Drittel sitzen, sitzt aber in Reihe ${detail.row}.`;
+    case 'back':
+      return `${name} soll im hinteren Drittel sitzen, sitzt aber in Reihe ${detail.row}.`;
+    case 'edge':
+      return `${name} soll am Rand sitzen, ist aber in der Mitte platziert.`;
+    case 'near_door':
+      return `${name} soll nahe der Tür sitzen, ist aber zu weit entfernt.`;
+    case 'near_board':
+      return `${name} soll nahe der Tafel sitzen, ist aber zu weit entfernt.`;
+    case 'not_window':
+      return `${name} soll nicht am Fenster sitzen, ist aber direkt daneben platziert.`;
+  }
+}
+
+function presetGoalLine(preset: 'balanced' | 'focus' | 'friendship'): string {
+  switch (preset) {
+    case 'focus':
+      return 'Ziel: Fokus- und Ruhe-optimiertes Layout mit strenger Trennung verhaltensauffälliger Schüler:innen.';
+    case 'friendship':
+      return 'Ziel: Freundschafts- und Motivations-Layout — Wunschnachbarn sitzen wenn möglich nebeneinander.';
+    case 'balanced':
+    default:
+      return 'Ziel: Ausgewogenes Layout, das alle harten Regeln und möglichst viele weiche Wünsche erfüllt.';
+  }
+}
+
+function buildExplanation(
+  preset: 'balanced' | 'focus' | 'friendship',
+  evaluation: { score: number; violations: SeatingViolation[] },
+  assignments: SeatingAssignment,
+  students: Student[],
+  totalSoftRules: number
+): string {
+  const goal = presetGoalLine(preset);
+
+  const placedCount = Object.values(assignments).filter((id) => id !== '').length;
+  const hardCount = evaluation.violations.filter((v) => v.type === 'hard').length;
+  const softViolatedCount = evaluation.violations.filter((v) => v.type === 'soft').length;
+  const softFulfilledCount = Math.max(totalSoftRules - softViolatedCount, 0);
+
+  const studentLabel = students.length === 1 ? 'Schüler:in' : 'Schüler:innen';
+  const achieved =
+    `Erreicht: ${placedCount} von ${students.length} ${studentLabel} platziert, ` +
+    `${hardCount} harte Konflikt${hardCount === 1 ? '' : 'e'}, ` +
+    `${softFulfilledCount} von ${totalSoftRules} weichen Wünsche${totalSoftRules === 1 ? '' : 'n'} erfüllt.`;
+
+  let open: string;
+  if (hardCount === 0 && softViolatedCount === 0) {
+    open = 'Offen: keine relevanten Wünsche unerfüllt.';
+  } else {
+    const parts: string[] = [];
+    if (hardCount > 0) {
+      parts.push(`${hardCount} harte Regel${hardCount === 1 ? '' : 'n'} verletzt`);
+    }
+    if (softViolatedCount > 0) {
+      parts.push(`${softViolatedCount} weiche Wünsche unerfüllt`);
+    }
+    open = `Offen: ${parts.join(', ')}.`;
+  }
+
+  return `${goal}\n${achieved}\n${open}`;
+}
+
 // Helper: Determine if two desks are adjacent (sharing a border or corner)
 function isAdjacent(d1: ClassroomElement, d2: ClassroomElement): boolean {
   return Math.abs(d1.x - d2.x) <= 1.5 && Math.abs(d1.y - d2.y) <= 1.5 && d1.id !== d2.id;
@@ -169,18 +298,32 @@ export function analyzeSeatingDiagnostics(
 
   const hardViolations = violations.filter((violation) => violation.type === 'hard');
 
+  const noteParts: string[] = [];
+  if (bottlenecks.length > 0) {
+    const bottleneckLabels: Record<SolverDiagnostics['bottlenecks'][number]['kind'], string> = {
+      frontRow: 'vordere Plätze',
+      doorAccess: 'türnahe Plätze',
+      window: 'fensterarme Plätze'
+    };
+    const summary = bottlenecks
+      .map((b) => `${bottleneckLabels[b.kind]} (${b.required} benötigt / ${b.available} verfügbar)`)
+      .join(', ');
+    noteParts.push(`Strukturelle Engpässe: ${summary}.`);
+  }
+  if (hardViolations.length > 0) {
+    noteParts.push(
+      `Es bleiben ${hardViolations.length} harte Konflikt(e): ${hardViolations
+        .slice(0, 3)
+        .map((violation) => violation.description)
+        .join(' ')}`
+    );
+  }
+
   return {
     unplacedStudents,
     bottlenecks,
     contradictoryRules: findContradictoryRules(rules),
-    ...(hardViolations.length > 0
-      ? {
-          note: `Es bleiben ${hardViolations.length} harte Konflikt(e): ${hardViolations
-            .slice(0, 3)
-            .map((violation) => violation.description)
-            .join(' ')}`
-        }
-      : {})
+    ...(noteParts.length > 0 ? { note: noteParts.join(' ') } : {})
   };
 }
 
@@ -259,7 +402,7 @@ export function evaluateSeating(
           id: `need-seh-${student.id}`,
           studentId: student.id,
           type: 'hard',
-          description: 'Sehschwäche: Sollte in der vorderen Reihe sitzen (nahe der Tafel).',
+          description: formatViolationDescription(students, student.id, { kind: 'need-seh' }),
           targetElementId: board.id
         });
       }
@@ -275,7 +418,7 @@ export function evaluateSeating(
           id: `need-hoer-${student.id}`,
           studentId: student.id,
           type: 'hard',
-          description: 'Hörschwäche: Sollte nahe bei der Tafel / vorne sitzen.',
+          description: formatViolationDescription(students, student.id, { kind: 'need-hoer' }),
           targetElementId: board.id
         });
       }
@@ -295,7 +438,7 @@ export function evaluateSeating(
           id: `need-barr-${student.id}`,
           studentId: student.id,
           type: 'hard',
-          description: 'Barrierefreiheit: Benötigt barrierefreien Platz nahe der Tür oder am Rand.',
+          description: formatViolationDescription(students, student.id, { kind: 'need-barr' }),
           targetElementId: doors[0]?.id
         });
       }
@@ -311,7 +454,7 @@ export function evaluateSeating(
           id: `need-konz-${student.id}`,
           studentId: student.id,
           type: 'soft',
-          description: 'Konzentrationsbedarf: Sollte nicht direkt am Fenster oder an der Tür sitzen.',
+          description: formatViolationDescription(students, student.id, { kind: 'need-konz' }),
         });
       }
     }
@@ -332,7 +475,10 @@ export function evaluateSeating(
                 id: `need-verh-${student.id}-${otherStudent.id}`,
                 studentId: student.id,
                 type: 'hard',
-                description: 'Verhaltensauffälligkeit: Darf nicht neben einem anderen Schüler mit erhöhtem Verhaltenbedarf sitzen.',
+                description: formatViolationDescription(students, student.id, {
+                  kind: 'need-verh',
+                  otherStudentId: otherStudent.id
+                }),
                 targetStudentId: otherStudent.id
               });
             }
@@ -366,7 +512,10 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: `Sollte neben ${students.find((s) => s.id === rule.targetId)?.name || 'Schüler'} sitzen.`,
+              description: formatViolationDescription(students, rule.studentId, {
+                kind: 'beside',
+                targetStudentId: rule.targetId
+              }),
               targetStudentId: rule.targetId
             });
           } else if (rule.strictness === 'soft') {
@@ -382,7 +531,10 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: `Darf NICHT neben ${students.find((s) => s.id === rule.targetId)?.name || 'Schüler'} sitzen.`,
+              description: formatViolationDescription(students, rule.studentId, {
+                kind: 'not_beside',
+                targetStudentId: rule.targetId
+              }),
               targetStudentId: rule.targetId
             });
           }
@@ -396,7 +548,11 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: `Sollte nahe bei ${students.find((s) => s.id === rule.targetId)?.name || 'Schüler'} sitzen.`,
+              description: formatViolationDescription(students, rule.studentId, {
+                kind: 'near',
+                targetStudentId: rule.targetId,
+                distanceCells: dist
+              }),
               targetStudentId: rule.targetId
             });
           }
@@ -410,7 +566,11 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: `Sollte weit weg von ${students.find((s) => s.id === rule.targetId)?.name || 'Schüler'} sitzen.`,
+              description: formatViolationDescription(students, rule.studentId, {
+                kind: 'far',
+                targetStudentId: rule.targetId,
+                distanceCells: dist
+              }),
               targetStudentId: rule.targetId
             });
           }
@@ -428,7 +588,10 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: 'Sollte im vorderen Drittel sitzen.',
+              description: formatViolationDescription(students, rule.studentId, {
+                kind: 'front',
+                row: Math.round(studentDesk.y - minY) + 1
+              }),
             });
           }
           break;
@@ -443,7 +606,10 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: 'Sollte im hinteren Drittel sitzen.',
+              description: formatViolationDescription(students, rule.studentId, {
+                kind: 'back',
+                row: Math.round(studentDesk.y - minY) + 1
+              }),
             });
           }
           break;
@@ -462,7 +628,7 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: 'Sollte am Rand sitzen.',
+              description: formatViolationDescription(students, rule.studentId, { kind: 'edge' }),
             });
           }
           break;
@@ -479,7 +645,7 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: 'Sollte nahe der Tür sitzen.',
+              description: formatViolationDescription(students, rule.studentId, { kind: 'near_door' }),
             });
           }
           break;
@@ -494,7 +660,7 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: 'Sollte nahe der Tafel sitzen.',
+              description: formatViolationDescription(students, rule.studentId, { kind: 'near_board' }),
               targetElementId: board.id
             });
           }
@@ -510,7 +676,7 @@ export function evaluateSeating(
               studentId: rule.studentId,
               ruleId: rule.id,
               type: rule.strictness,
-              description: 'Sollte nicht am Fenster sitzen.',
+              description: formatViolationDescription(students, rule.studentId, { kind: 'not_window' }),
             });
           }
           break;
@@ -601,27 +767,15 @@ export function generateSeatingPlan(
 
   // Generate automated explanation based on properties and violations
   let presetName = 'Ausgewogener Sitzplan';
-  let focusDetail = 'Dieser Plan versucht, alle Regeln optimal auszubalancieren.';
-  
   if (preset === 'focus') {
     presetName = 'Fokus- & Ruhe-optimierter Sitzplan';
-    focusDetail = 'Dieser Plan trennt Schüler mit Verhaltensbedarfen strikt und platziert ablenkungsgefährdete Kinder abseits von Fenster und Tür.';
   } else if (preset === 'friendship') {
     presetName = 'Freundschafts- & Motivations-Sitzplan';
-    focusDetail = 'Dieser Plan priorisiert das Nebeneinandersitzen von Wunschnachbarn, auch wenn dadurch leichte Positionspräferenzen hintenanstehen.';
   }
 
   const hardViolations = bestEval.violations.filter((v) => v.type === 'hard');
-  const softViolations = bestEval.violations.filter((v) => v.type === 'soft');
-
-  let explanation: string;
-  if (hardViolations.length === 0 && softViolations.length === 0) {
-    explanation = `${presetName}: Perfekter Sitzplan! Alle ${rules.length} definierten Regeln und alle besonderen Anforderungen der Schüler wurden vollständig eingehalten. ${focusDetail}`;
-  } else if (hardViolations.length === 0) {
-    explanation = `${presetName}: Optimierter Sitzplan. Alle harten Regeln (wie Barrierefreiheit und Sehschwächen) wurden erfolgreich eingehalten. Es gibt lediglich ${softViolations.length} verletzte weiche Wünsche. ${focusDetail}`;
-  } else {
-    explanation = `${presetName}: Optimierter Sitzplan. Es gab strukturelle Konflikte im Raum (z. B. zu wenig vordere Sitzplätze für alle Sehschwächen oder widersprüchliche Nachbarschaftswünsche). ${hardViolations.length} harte Regeln und ${softViolations.length} weiche Regeln konnten nicht erfüllt werden. ${focusDetail}`;
-  }
+  const totalSoftRules = rules.filter((r) => r.strictness === 'soft').length;
+  const explanation = buildExplanation(preset, bestEval, bestAssignments, students, totalSoftRules);
 
   return {
     id: newId(`proposal-${preset}`),
