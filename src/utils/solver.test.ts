@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { generateSeatingPlan, evaluateSeating } from './solver';
+import { generateSeatingPlan, generateSeatingProposals, evaluateSeating } from './solver';
 import type { Rule, ClassroomLayout, SeatingAssignment } from '../types';
 import {
   SMALL_STUDENTS,
@@ -209,6 +209,29 @@ describe('generateSeatingPlan -- hard `not_beside` constraint', () => {
         { kind: 'frontRow', required: 3, available: 2 }
       ])
     );
+  });
+});
+
+describe('generateSeatingProposals -- seeded determinism', () => {
+  it('returns identical proposals[].assignments on consecutive calls with the same seed', () => {
+    const first = generateSeatingProposals(SMALL_STUDENTS, [], SMALL_LAYOUT, { seed: 42 });
+    const second = generateSeatingProposals(SMALL_STUDENTS, [], SMALL_LAYOUT, { seed: 42 });
+
+    expect(first).toHaveLength(3);
+    expect(second).toHaveLength(3);
+    first.forEach((proposal, i) => {
+      expect(proposal.assignments).toEqual(second[i].assignments);
+    });
+  });
+
+  it('returns 3 proposals without opts (Math.random fallback)', () => {
+    const proposals = generateSeatingProposals(SMALL_STUDENTS, [], SMALL_LAYOUT);
+    expect(proposals).toHaveLength(3);
+    proposals.forEach((p) => {
+      expect(p).toBeDefined();
+      expect(p.assignments).toBeDefined();
+      expect(typeof p.score).toBe('number');
+    });
   });
 });
 

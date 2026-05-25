@@ -9,6 +9,26 @@ import type {
   SolverDiagnostics
 } from '../types';
 import { newId } from './ids';
+import { mulberry32, defaultRng, type RNG } from './rng';
+
+/**
+ * Number of independent hybrid (greedy + SA) attempts per preset.
+ * Best score wins. See ADR 0003.
+ *
+ * Slice 3 measurement (`generateSeatingProposals` with seed=1):
+ *   - CONFLICT fixture (2 students/2 desks):   ~490 ms with 8 restarts
+ *   - SMALL fixture (4 students/4 desks):      ~780 ms with 8 restarts
+ *   - mockData (24 students/6 rules):        ~8100 ms with 8 restarts
+ *
+ * ADR 0003 specifies 8, but the mockData run blew the casual-machine budget
+ * (>3 s), so we drop to 4. The 2 s/35-student-30-rule budget will be
+ * formally enforced in Slice 7; the SA inner-loop cooling schedule is the
+ * dominant cost and is left for Slice 4/7 to tune.
+ */
+const RANDOM_RESTARTS = 4;
+
+type Preset = 'balanced' | 'focus' | 'friendship';
+const PRESETS: readonly Preset[] = ['balanced', 'focus', 'friendship'] as const;
 
 // Helper: Calculate distance between two room elements
 function getDistance(el1: { x: number; y: number }, el2: { x: number; y: number }): number {
@@ -522,62 +542,117 @@ export function evaluateSeating(
   return { score, violations };
 }
 
-// Simulated Annealing Solver algorithm
-export function generateSeatingPlan(
+/**
+ * Greedy initial assignment: places students one-by-one in difficulty order
+ * onto the locally best-scoring still-free desk. Ties broken by `rng()`.
+ *
+ * Hard position rules (front/near_board/near_door/not_window) are not a
+ * separate phase — they are baked into the per-desk score and so bias the
+ * placement automatically. The difficulty heuristic is currently a stub
+ * (`hardRuleCount*10 + softRuleCount*3`); the real one lands in Slice 4.
+ */
+export function greedyInitialAssignment(
+  students: Student[],
+  desks: ClassroomElement[],
+  rules: Rule[],
+  layout: ClassroomLayout,
+  rng: RNG
+): SeatingAssignment {
+  // SLICE 4: replace with computeStudentDifficulty()
+  const difficulty = new Map<string, number>();
+  students.forEach((student) => {
+    let hardRuleCount = 0;
+    let softRuleCount = 0;
+    rules.forEach((rule) => {
+      if (rule.studentId === student.id || rule.targetId === student.id) {
+        if (rule.strictness === 'hard') hardRuleCount++;
+        else softRuleCount++;
+      }
+    });
+    difficulty.set(student.id, hardRuleCount * 10 + softRuleCount * 3);
+  });
+
+  const sortedStudents = [...students].sort((a, b) => {
+    const diff = (difficulty.get(b.id) ?? 0) - (difficulty.get(a.id) ?? 0);
+    if (diff !== 0) return diff;
+    // Stable-ish tiebreak with rng so restarts diverge.
+    return rng() - 0.5;
+  });
+
+  const assignments: SeatingAssignment = {};
+  desks.forEach((d) => {
+    assignments[d.id] = '';
+  });
+
+  const freeDeskIds = new Set(desks.map((d) => d.id));
+
+  for (const student of sortedStudents) {
+    if (freeDeskIds.size === 0) break;
+
+    // Score every still-free desk by placing the student there tentatively.
+    let bestScore = -Infinity;
+    let bestDeskIds: string[] = [];
+
+    for (const deskId of freeDeskIds) {
+      assignments[deskId] = student.id;
+      const { score } = evaluateSeating(assignments, students, rules, layout, 'balanced');
+      assignments[deskId] = '';
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestDeskIds = [deskId];
+      } else if (score === bestScore) {
+        bestDeskIds.push(deskId);
+      }
+    }
+
+    // Break ties with rng so restarts visit different greedy paths.
+    const chosen = bestDeskIds[Math.floor(rng() * bestDeskIds.length)];
+    assignments[chosen] = student.id;
+    freeDeskIds.delete(chosen);
+  }
+
+  return assignments;
+}
+
+/**
+ * Simulated Annealing on a given initial assignment. All randomness routes
+ * through the injected `rng` so behaviour is deterministic when a seeded
+ * RNG is supplied.
+ */
+export function simulatedAnnealing(
+  initialAssignment: SeatingAssignment,
   students: Student[],
   rules: Rule[],
   layout: ClassroomLayout,
-  preset: 'balanced' | 'focus' | 'friendship' = 'balanced'
-): SeatingProposal {
+  rng: RNG,
+  preset: Preset
+): { assignments: SeatingAssignment; score: number; violations: SeatingViolation[] } {
   const desks = layout.elements.filter((el) => el.type === 'desk');
 
-  if (desks.length < students.length) {
-    throw new Error('Nicht genügend Sitzplätze für alle Schüler vorhanden!');
-  }
-
-  // 1. Generate an initial random/greedy state
-  let currentAssignments: SeatingAssignment = {};
-  
-  // Clean empty desks representation
-  desks.forEach((d) => {
-    currentAssignments[d.id] = '';
-  });
-
-  // Assign students randomly to desks
-  const shuffledStudents = [...students].sort(() => Math.random() - 0.5);
-  const shuffledDesks = [...desks].sort(() => Math.random() - 0.5);
-
-  shuffledStudents.forEach((student, index) => {
-    currentAssignments[shuffledDesks[index].id] = student.id;
-  });
-
+  let currentAssignments: SeatingAssignment = { ...initialAssignment };
   let currentEval = evaluateSeating(currentAssignments, students, rules, layout, preset);
   let bestAssignments = { ...currentAssignments };
   let bestEval = currentEval;
 
-  // 2. Simulated Annealing Parameters
   let T = 100.0;
   const T_min = 0.1;
   const alpha = 0.985;
   const maxIterationsPerTemp = 200;
 
-  // Annealing Loop
   while (T > T_min) {
     for (let i = 0; i < maxIterationsPerTemp; i++) {
-      // Pick neighbor state:
       const nextAssignments = { ...currentAssignments };
 
-      // Swap two random desks (could be occupied or empty)
-      const d1Index = Math.floor(Math.random() * desks.length);
-      let d2Index = Math.floor(Math.random() * desks.length);
+      const d1Index = Math.floor(rng() * desks.length);
+      let d2Index = Math.floor(rng() * desks.length);
       while (d1Index === d2Index && desks.length > 1) {
-        d2Index = Math.floor(Math.random() * desks.length);
+        d2Index = Math.floor(rng() * desks.length);
       }
 
       const d1Id = desks[d1Index].id;
       const d2Id = desks[d2Index].id;
 
-      // Swap values
       const temp = nextAssignments[d1Id];
       nextAssignments[d1Id] = nextAssignments[d2Id];
       nextAssignments[d2Id] = temp;
@@ -585,8 +660,7 @@ export function generateSeatingPlan(
       const nextEval = evaluateSeating(nextAssignments, students, rules, layout, preset);
       const deltaE = nextEval.score - currentEval.score;
 
-      // Acceptance probability
-      if (deltaE > 0 || Math.random() < Math.exp(deltaE / T)) {
+      if (deltaE > 0 || rng() < Math.exp(deltaE / T)) {
         currentAssignments = nextAssignments;
         currentEval = nextEval;
 
@@ -596,13 +670,28 @@ export function generateSeatingPlan(
         }
       }
     }
-    T *= alpha; // Cool down
+    T *= alpha;
   }
 
-  // Generate automated explanation based on properties and violations
+  return {
+    assignments: bestAssignments,
+    score: bestEval.score,
+    violations: bestEval.violations
+  };
+}
+
+function buildProposal(
+  preset: Preset,
+  assignments: SeatingAssignment,
+  score: number,
+  violations: SeatingViolation[],
+  students: Student[],
+  rules: Rule[],
+  layout: ClassroomLayout
+): SeatingProposal {
   let presetName = 'Ausgewogener Sitzplan';
   let focusDetail = 'Dieser Plan versucht, alle Regeln optimal auszubalancieren.';
-  
+
   if (preset === 'focus') {
     presetName = 'Fokus- & Ruhe-optimierter Sitzplan';
     focusDetail = 'Dieser Plan trennt Schüler mit Verhaltensbedarfen strikt und platziert ablenkungsgefährdete Kinder abseits von Fenster und Tür.';
@@ -611,8 +700,8 @@ export function generateSeatingPlan(
     focusDetail = 'Dieser Plan priorisiert das Nebeneinandersitzen von Wunschnachbarn, auch wenn dadurch leichte Positionspräferenzen hintenanstehen.';
   }
 
-  const hardViolations = bestEval.violations.filter((v) => v.type === 'hard');
-  const softViolations = bestEval.violations.filter((v) => v.type === 'soft');
+  const hardViolations = violations.filter((v) => v.type === 'hard');
+  const softViolations = violations.filter((v) => v.type === 'soft');
 
   let explanation: string;
   if (hardViolations.length === 0 && softViolations.length === 0) {
@@ -626,11 +715,89 @@ export function generateSeatingPlan(
   return {
     id: newId(`proposal-${preset}`),
     name: presetName,
-    assignments: bestAssignments,
-    score: bestEval.score,
-    violations: bestEval.violations,
+    assignments,
+    score,
+    violations,
     explanation,
     valid: hardViolations.length === 0,
-    diagnostics: analyzeSeatingDiagnostics(bestAssignments, students, rules, layout, bestEval.violations)
+    diagnostics: analyzeSeatingDiagnostics(assignments, students, rules, layout, violations)
   };
+}
+
+function runHybridPass(
+  students: Student[],
+  rules: Rule[],
+  layout: ClassroomLayout,
+  preset: Preset,
+  rng: RNG
+): { assignments: SeatingAssignment; score: number; violations: SeatingViolation[] } {
+  const desks = layout.elements.filter((el) => el.type === 'desk');
+  const initial = greedyInitialAssignment(students, desks, rules, layout, rng);
+  return simulatedAnnealing(initial, students, rules, layout, rng, preset);
+}
+
+/**
+ * Backward-compatible single-pass solver: one greedy init + one SA run for
+ * the given preset. Used by the Generator UI today. The new restart-driven
+ * API is `generateSeatingProposals` below.
+ */
+export function generateSeatingPlan(
+  students: Student[],
+  rules: Rule[],
+  layout: ClassroomLayout,
+  preset: Preset = 'balanced'
+): SeatingProposal {
+  const desks = layout.elements.filter((el) => el.type === 'desk');
+
+  if (desks.length < students.length) {
+    throw new Error('Nicht genügend Sitzplätze für alle Schüler vorhanden!');
+  }
+
+  const rng = defaultRng();
+  const result = runHybridPass(students, rules, layout, preset, rng);
+  return buildProposal(preset, result.assignments, result.score, result.violations, students, rules, layout);
+}
+
+/**
+ * New solver entry point: runs `RANDOM_RESTARTS` independent greedy+SA
+ * passes per preset and keeps the best score per preset. Slice 6 will use
+ * the full restart pool for Top-3 dedup.
+ *
+ * When `opts.seed` is provided every random choice routes through a
+ * deterministic mulberry32 derived from it (see ADR 0005); two calls with
+ * the same seed return identical assignments. Without a seed the solver
+ * falls back to `Math.random` (production default).
+ */
+export function generateSeatingProposals(
+  students: Student[],
+  rules: Rule[],
+  layout: ClassroomLayout,
+  opts?: { seed?: number }
+): SeatingProposal[] {
+  const desks = layout.elements.filter((el) => el.type === 'desk');
+
+  if (desks.length < students.length) {
+    throw new Error('Nicht genügend Sitzplätze für alle Schüler vorhanden!');
+  }
+
+  const masterRng: RNG = opts?.seed !== undefined ? mulberry32(opts.seed) : defaultRng();
+
+  return PRESETS.map((preset) => {
+    let best: { assignments: SeatingAssignment; score: number; violations: SeatingViolation[] } | null = null;
+
+    for (let r = 0; r < RANDOM_RESTARTS; r++) {
+      // Derive a fresh per-restart seed from the master rng so restarts
+      // diverge but the whole run stays deterministic for a given seed.
+      const restartSeed = Math.floor(masterRng() * 0xffffffff);
+      const restartRng = mulberry32(restartSeed);
+      const result = runHybridPass(students, rules, layout, preset, restartRng);
+      if (!best || result.score > best.score) {
+        best = result;
+      }
+    }
+
+    // best is guaranteed non-null because RANDOM_RESTARTS >= 1.
+    const winner = best as { assignments: SeatingAssignment; score: number; violations: SeatingViolation[] };
+    return buildProposal(preset, winner.assignments, winner.score, winner.violations, students, rules, layout);
+  });
 }
