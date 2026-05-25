@@ -77,6 +77,8 @@ export interface SeatingProposal {
   score: number;
   violations: SeatingViolation[];
   explanation: string;
+  // false if proposal has any hard-severity violation; orthogonal to score.
+  valid: boolean;
 }
 
 export interface SchoolClass {

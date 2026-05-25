@@ -11,6 +11,8 @@
 
 ## P0 – Sofort relevant
 
+> Status 2026-05-25: P0-Items "Storage versionieren", "Import validieren", "Solver-Hard-Constraints härten" sind auf `feat/milestone-1` umgesetzt. CI eingerichtet (Job grün, sobald Lint-Baseline geräumt ist). Solver-Tests (P1) als Slice 6 noch offen. macOS-Build-Härtung separat.
+
 ### Storage versionieren
 
 **Problem:** Aktuell liegen Daten direkt in `localStorage` bzw. in der macOS-App in `UserDefaults`. Ohne Schema-Version sind spätere Änderungen riskant.
@@ -48,8 +50,8 @@ Akzeptanzkriterien:
 
 Akzeptanzkriterien:
 
-- GitHub Actions für `npm ci`, `npm run lint`, `npm run build`
-- später zusätzlich `npm test -- --run`
+- GitHub Actions für `pnpm install --frozen-lockfile`, `pnpm lint`, `pnpm build`
+- später zusätzlich `pnpm test`
 - macOS-Pfadänderungen lösen mindestens `swift build` aus
 - PRs ohne grüne relevante Builds gelten als nicht mergefähig
 
@@ -68,7 +70,7 @@ Akzeptanzkriterien:
 
 Akzeptanzkriterien:
 
-- `npm test` existiert
+- `pnpm test` existiert
 - Solver-Basistests vorhanden
 - Parser-Basistests vorhanden
 - Storage-Migrationstest vorhanden

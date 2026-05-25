@@ -16,11 +16,15 @@ Web-App für Lehrkräfte (DE) zur Sitzplan-Erstellung. Verwaltet Klassen, Schül
 
 ## Scripts
 
+**Package-Manager: pnpm.** Kein `npm`, kein `yarn`. Lockfile ist `pnpm-lock.yaml`. `package-lock.json` ist Altlast und wird entfernt.
+
 ```bash
-npm run dev      # Vite dev server (Port 5173, fallback 5174)
-npm run build    # tsc -b && vite build
-npm run lint     # eslint .
-npm run preview  # serve dist/
+pnpm install     # Dependencies
+pnpm dev         # Vite dev server (Port 5173, fallback 5174)
+pnpm build       # tsc -b && vite build
+pnpm lint        # eslint .
+pnpm test        # vitest run (sobald eingerichtet)
+pnpm preview     # serve dist/
 ```
 
 ## Architektur (kurz)
@@ -77,13 +81,25 @@ Das Stylesheet [src/index.css](src/index.css) ist die **single source of truth**
 
 ## Workflow für Änderungen
 
-1. Vor Edits: `code-review-graph` MCP nutzen (siehe globale CLAUDE.md & `/Volumes/T7/Projekte/CLAUDE.md`).
-2. Lokal: `npm run dev` → visuell verifizieren im Browser (Dark + Light umschalten).
-3. Vor Commit: `npm run build` muss grün sein. ESLint warnings dürfen nicht zunehmen.
-4. Bei UI-Änderungen: Print-Preview testen (`Cmd+P` im Browser auf Generator-View).
+1. Vor Edits: **`code-review-graph` (CRG) MCP zuerst** — `semantic_search_nodes`, `query_graph`, `get_impact_radius`, `detect_changes`. Erst wenn der Graph nicht ausreicht, auf Grep/Glob/Read ausweichen. Begründung: schneller, billiger (weniger Tokens), strukturkontextbewusst (Caller/Callees/Tests). Siehe auch `/Volumes/T7/Projekte/CLAUDE.md`.
+2. **`context-mode` MCP für Bulk-Shell und Such-Aggregation** — `ctx_batch_execute` für mehrere Shell-Commands plus Suchen in einem Call, `ctx_execute_file` für Code-Analyse großer Files. Bash bleibt nur für `git`, `mkdir`, `rm`, `mv`, Navigation. Hintergrund: rohe Tool-Outputs flooden das Context-Window — context-mode hält die Daten im Sandbox und zieht nur die Zusammenfassung herein.
+3. Lokal: `pnpm dev` → visuell verifizieren im Browser (Dark + Light umschalten).
+4. Vor Commit: `pnpm build` muss grün sein. ESLint warnings dürfen nicht zunehmen.
+5. Bei UI-Änderungen: Print-Preview testen (`Cmd+P` im Browser auf Generator-View).
+
+### MCP-Pipeline (Kurzreferenz)
+
+| Zweck | Tool |
+|---|---|
+| Code-Exploration, Review, Impact | `code-review-graph` (`semantic_search_nodes`, `detect_changes`, `get_impact_radius`, `query_graph`) |
+| Mehrere Shell-Commands + Suchen in einem Call | `ctx_batch_execute` |
+| Einzel-Analyse, große Logs, API-Calls | `ctx_execute` / `ctx_execute_file` |
+| Webseite fetchen + indexieren | `ctx_fetch_and_index` (statt `curl`/`WebFetch`) |
+| Datei lesen für Edit | `Read` → `Edit`/`Write` |
+| Library-Docs (React, Vite, Vitest, etc.) | `context7` (`resolve-library-id` → `query-docs`) |
 
 ## Pitfalls aus der Vergangenheit
 
-- React 19 + Vite 8 sind frisch. Bei kuriosen Build-Fehlern zuerst `rm -rf node_modules dist && npm install` probieren.
+- React 19 + Vite 8 sind frisch. Bei kuriosen Build-Fehlern zuerst `rm -rf node_modules dist && pnpm install` probieren.
 - `lucide-react` v1.x hat andere Icon-Namen als v0.x – Naming-Kollisionen möglich.
 - `tsc -b` ist strict. Implizite `any` werden hart abgelehnt.

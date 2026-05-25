@@ -7,6 +7,7 @@ import type {
   SeatingViolation,
   SeatingProposal
 } from '../types';
+import { newId } from './ids';
 
 // Helper: Calculate distance between two room elements
 function getDistance(el1: { x: number; y: number }, el2: { x: number; y: number }): number {
@@ -448,24 +449,22 @@ export function generateSeatingPlan(
   const hardViolations = bestEval.violations.filter((v) => v.type === 'hard');
   const softViolations = bestEval.violations.filter((v) => v.type === 'soft');
 
-  let explanation = '';
+  let explanation: string;
   if (hardViolations.length === 0 && softViolations.length === 0) {
     explanation = `${presetName}: Perfekter Sitzplan! Alle ${rules.length} definierten Regeln und alle besonderen Anforderungen der Schüler wurden vollständig eingehalten. ${focusDetail}`;
+  } else if (hardViolations.length === 0) {
+    explanation = `${presetName}: Optimierter Sitzplan. Alle harten Regeln (wie Barrierefreiheit und Sehschwächen) wurden erfolgreich eingehalten. Es gibt lediglich ${softViolations.length} verletzte weiche Wünsche. ${focusDetail}`;
   } else {
-    explanation = `${presetName}: Optimierter Sitzplan. `;
-    if (hardViolations.length === 0) {
-      explanation += `Alle harten Regeln (wie Barrierefreiheit und Sehschwächen) wurden erfolgreich eingehalten. Es gibt lediglich ${softViolations.length} verletzte weiche Wünsche. ${focusDetail}`;
-    } else {
-      explanation += `Es gab strukturelle Konflikte im Raum (z. B. zu wenig vordere Sitzplätze für alle Sehschwächen oder widersprüchliche Nachbarschaftswünsche). ${hardViolations.length} harte Regeln und ${softViolations.length} weiche Regeln konnten nicht erfüllt werden. ${focusDetail}`;
-    }
+    explanation = `${presetName}: Optimierter Sitzplan. Es gab strukturelle Konflikte im Raum (z. B. zu wenig vordere Sitzplätze für alle Sehschwächen oder widersprüchliche Nachbarschaftswünsche). ${hardViolations.length} harte Regeln und ${softViolations.length} weiche Regeln konnten nicht erfüllt werden. ${focusDetail}`;
   }
 
   return {
-    id: `proposal-${preset}-${Date.now()}`,
+    id: newId(`proposal-${preset}`),
     name: presetName,
     assignments: bestAssignments,
     score: bestEval.score,
     violations: bestEval.violations,
-    explanation
+    explanation,
+    valid: hardViolations.length === 0
   };
 }

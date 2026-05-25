@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -15,86 +15,92 @@ import { RuleMgmt } from './components/RuleMgmt';
 import { RoomEditor } from './components/RoomEditor';
 import { Generator } from './components/Generator';
 import { MOCK_CLASS, MOCK_CLASSROOM_LAYOUT } from './utils/mockData';
+import { loadClasses, loadLayout, saveClasses, saveLayout } from './utils/storage';
+import { newId } from './utils/ids';
+import { cleanRulesForDeletedStudent } from './utils/cleanup';
 import './index.css';
 
-const LOCAL_STORAGE_KEY_CLASSES = 'sitzplaner_classes';
-const LOCAL_STORAGE_KEY_LAYOUT = 'sitzplaner_layout';
+const DEFAULT_LAYOUT: ClassroomLayout = {
+  width: 12,
+  height: 10,
+  elements: []
+};
+
+// Single initial-load snapshot. Hoisted out of the component so the I/O
+// happens exactly once per module evaluation, instead of N times across
+// useState initializers.
+const INITIAL_CLASSES = loadClasses();
+const INITIAL_LAYOUT = loadLayout();
+
+// If either side has a future schema version, the app must NOT write back —
+// otherwise mutation would overwrite the future-version payload with an
+// older-version one. UI surfaces this via a read-only banner.
+const STORAGE_READ_ONLY =
+  INITIAL_CLASSES.status === 'unsupported-version' ||
+  INITIAL_LAYOUT.status === 'unsupported-version';
 
 function App() {
-  const [classes, setClasses] = useState<SchoolClass[]>([]);
-  const [activeClassId, setActiveClassId] = useState<string>('');
-  const [layout, setLayout] = useState<ClassroomLayout>({
-    width: 12,
-    height: 10,
-    elements: []
-  });
+  const [classes, setClasses] = useState<SchoolClass[]>(INITIAL_CLASSES.data);
+  const [activeClassId, setActiveClassId] = useState<string>(
+    INITIAL_CLASSES.data.length > 0 ? INITIAL_CLASSES.data[0].id : ''
+  );
+  const [layout, setLayout] = useState<ClassroomLayout>(
+    INITIAL_LAYOUT.data ?? DEFAULT_LAYOUT
+  );
   const [activeTab, setActiveTab] = useState<'dashboard' | 'students' | 'rules' | 'room' | 'generator'>('dashboard');
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window === 'undefined') return 'light';
+    const saved = localStorage.getItem('sitzplaner_theme') as 'light' | 'dark' | null;
+    if (saved) return saved;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
 
-  // 1. Initial State Loading from LocalStorage
+  // Apply data-theme attribute whenever theme changes (covers initial + toggle).
   useEffect(() => {
-    const savedClasses = localStorage.getItem(LOCAL_STORAGE_KEY_CLASSES);
-    const savedLayout = localStorage.getItem(LOCAL_STORAGE_KEY_LAYOUT);
-    
-    // Check system preferred theme
-    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    const savedTheme = localStorage.getItem('sitzplaner_theme') as 'light' | 'dark' | null;
-    
-    const activeTheme = savedTheme || systemTheme;
-    setTheme(activeTheme);
-    document.documentElement.setAttribute('data-theme', activeTheme);
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
-    if (savedClasses) {
-      try {
-        const parsedClasses = JSON.parse(savedClasses);
-        setClasses(parsedClasses);
-        if (parsedClasses.length > 0) {
-          setActiveClassId(parsedClasses[0].id);
-        }
-      } catch (e) {
-        console.error('Fehler beim Laden der Klassen aus LocalStorage', e);
-      }
+  // Persist classes only after user mutation, and only when not in read-only
+  // mode (read-only protects future-schema data from being overwritten).
+  const classesMutatedRef = useRef(false);
+  useEffect(() => {
+    if (!classesMutatedRef.current) {
+      classesMutatedRef.current = true;
+      return;
     }
+    if (STORAGE_READ_ONLY) return;
+    saveClasses(classes);
+  }, [classes]);
 
-    if (savedLayout) {
-      try {
-        setLayout(JSON.parse(savedLayout));
-      } catch (e) {
-        console.error('Fehler beim Laden des Grundrisses aus LocalStorage', e);
-      }
+  // Persist layout: same gating.
+  const layoutMutatedRef = useRef(false);
+  useEffect(() => {
+    if (!layoutMutatedRef.current) {
+      layoutMutatedRef.current = true;
+      return;
     }
-  }, []);
+    if (STORAGE_READ_ONLY) return;
+    saveLayout(layout);
+  }, [layout]);
 
-  // Helper: Persist active state to localStorage
-  const saveStateToLocalStorage = (updatedClasses: SchoolClass[], updatedLayout: ClassroomLayout) => {
-    localStorage.setItem(LOCAL_STORAGE_KEY_CLASSES, JSON.stringify(updatedClasses));
-    localStorage.setItem(LOCAL_STORAGE_KEY_LAYOUT, JSON.stringify(updatedLayout));
-  };
-
-  // Theme Toggler
+  // Theme Toggler — data-theme attribute is synced by the useEffect above.
   const toggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light';
     setTheme(nextTheme);
     localStorage.setItem('sitzplaner_theme', nextTheme);
-    document.documentElement.setAttribute('data-theme', nextTheme);
   };
 
   // Example Preloader Logic
   const handleLoadExampleClass = () => {
     const hasExisting = classes.some((c) => c.id === MOCK_CLASS.id);
-    let updatedClasses = [...classes];
-
-    if (!hasExisting) {
-      updatedClasses = [MOCK_CLASS, ...classes];
-    } else {
-      updatedClasses = classes.map((c) => (c.id === MOCK_CLASS.id ? MOCK_CLASS : c));
-    }
+    const updatedClasses = hasExisting
+      ? classes.map((c) => (c.id === MOCK_CLASS.id ? MOCK_CLASS : c))
+      : [MOCK_CLASS, ...classes];
 
     setClasses(updatedClasses);
     setLayout(MOCK_CLASSROOM_LAYOUT);
     setActiveClassId(MOCK_CLASS.id);
-    saveStateToLocalStorage(updatedClasses, MOCK_CLASSROOM_LAYOUT);
-    
+
     // Direct user to generator view to see the magic immediately
     setActiveTab('generator');
   };
@@ -102,7 +108,7 @@ function App() {
   // Create new Class
   const handleCreateClass = (name: string) => {
     const newClass: SchoolClass = {
-      id: `class-${Date.now()}`,
+      id: newId('class'),
       name,
       students: [],
       rules: []
@@ -110,7 +116,6 @@ function App() {
     const updated = [...classes, newClass];
     setClasses(updated);
     setActiveClassId(newClass.id);
-    saveStateToLocalStorage(updated, layout);
   };
 
   // Delete Class
@@ -120,7 +125,6 @@ function App() {
     if (activeClassId === id) {
       setActiveClassId(updated.length > 0 ? updated[0].id : '');
     }
-    saveStateToLocalStorage(updated, layout);
   };
 
   // Add Student to Active Class
@@ -128,7 +132,7 @@ function App() {
     if (!activeClassId) return;
 
     const newStudent: Student = {
-      id: `student-${Date.now()}`,
+      id: newId('student'),
       name,
       specialNeeds
     };
@@ -144,7 +148,6 @@ function App() {
     });
 
     setClasses(updatedClasses);
-    saveStateToLocalStorage(updatedClasses, layout);
   };
 
   // Update Student in Active Class
@@ -164,7 +167,6 @@ function App() {
     });
 
     setClasses(updatedClasses);
-    saveStateToLocalStorage(updatedClasses, layout);
   };
 
   // Delete Student from Active Class & clean relations rules
@@ -177,14 +179,13 @@ function App() {
           ...c,
           students: c.students.filter((s) => s.id !== studentId),
           // filter out dangling rules referencing deleted student
-          rules: c.rules.filter((r) => r.studentId !== studentId && r.targetId !== studentId)
+          rules: cleanRulesForDeletedStudent(c.rules, studentId)
         };
       }
       return c;
     });
 
     setClasses(updatedClasses);
-    saveStateToLocalStorage(updatedClasses, layout);
   };
 
   // Add Custom Rule
@@ -193,7 +194,7 @@ function App() {
 
     const newRule: Rule = {
       ...rule,
-      id: `rule-${Date.now()}`
+      id: newId('rule')
     };
 
     const updatedClasses = classes.map((c) => {
@@ -207,7 +208,6 @@ function App() {
     });
 
     setClasses(updatedClasses);
-    saveStateToLocalStorage(updatedClasses, layout);
   };
 
   // Delete Custom Rule
@@ -225,13 +225,11 @@ function App() {
     });
 
     setClasses(updatedClasses);
-    saveStateToLocalStorage(updatedClasses, layout);
   };
 
   // Update Seating Layout
   const handleUpdateLayout = (newLayout: ClassroomLayout) => {
     setLayout(newLayout);
-    saveStateToLocalStorage(classes, newLayout);
   };
 
   // Import JSON File
@@ -241,7 +239,6 @@ function App() {
     if (data.classes.length > 0) {
       setActiveClassId(data.classes[0].id);
     }
-    saveStateToLocalStorage(data.classes, data.layout);
   };
 
   // Export JSON File
@@ -305,6 +302,27 @@ function App() {
         </div>
       </header>
 
+      {STORAGE_READ_ONLY && (
+        <div
+          role="alert"
+          style={{
+            margin: '0.75rem 1rem 0',
+            padding: '0.75rem 1rem',
+            border: '1px solid var(--danger, #d33)',
+            borderRadius: 'var(--radius-md, 8px)',
+            background: 'var(--danger-light, rgba(221, 51, 51, 0.08))',
+            color: 'var(--ink, inherit)',
+            fontSize: '0.9rem'
+          }}
+        >
+          <strong>Schreibgeschützter Modus.</strong> Im Browser-Speicher liegen
+          Daten in einem neueren Schema-Format, als diese App-Version versteht.
+          Speichern ist deaktiviert, damit die neueren Daten nicht überschrieben
+          werden. Bitte App-Version aktualisieren oder eine ältere Browser-Session
+          verwenden.
+        </div>
+      )}
+
       {/* Main Panel Content */}
       <main className="app-main">
         {activeTab === 'dashboard' && (
@@ -355,14 +373,12 @@ function App() {
                 c.id === activeClassId ? { ...c, rules: newRules } : c
               );
               setClasses(updated);
-              localStorage.setItem(LOCAL_STORAGE_KEY_CLASSES, JSON.stringify(updated));
             }}
             onUpdateStudents={(newStudents) => {
               const updated = classes.map((c) =>
                 c.id === activeClassId ? { ...c, students: newStudents } : c
               );
               setClasses(updated);
-              localStorage.setItem(LOCAL_STORAGE_KEY_CLASSES, JSON.stringify(updated));
             }}
             activeClassName={activeClass.name}
           />

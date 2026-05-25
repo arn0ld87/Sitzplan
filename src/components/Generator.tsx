@@ -18,6 +18,7 @@ import type {
 } from '../types';
 import { generateSeatingPlan, evaluateSeating } from '../utils/solver';
 import { parseNaturalLanguageCommand } from '../utils/parser';
+import { newId } from '../utils/ids';
 
 interface GeneratorProps {
   students: Student[];
@@ -88,15 +89,22 @@ export const Generator: React.FC<GeneratorProps> = ({
       setProposals([propA, propB, propC]);
       setActiveProposalId(propA.id);
       setSelectedSeatId(null);
-    } catch (err: any) {
-      alert(err.message || 'Fehler beim Berechnen des Sitzplans.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Fehler beim Berechnen des Sitzplans.';
+      alert(message);
     }
   };
 
+  // Auto-calc once when entering with students but no proposals yet.
+  // Deferred to a microtask so the state update doesn't fire synchronously
+  // inside the effect; deps intentionally narrow so we don't restart on
+  // every render of proposals/handleCalculatePlans.
   useEffect(() => {
     if (students.length > 0 && proposals.length === 0) {
-      handleCalculatePlans();
+      const t = setTimeout(() => handleCalculatePlans(), 0);
+      return () => clearTimeout(t);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [students]);
 
   const activeProposal = proposals.find((p) => p.id === activeProposalId);
@@ -135,7 +143,8 @@ export const Generator: React.FC<GeneratorProps> = ({
         assignments: updatedAssignments,
         score: evaluation.score,
         violations: evaluation.violations,
-        explanation: `Manuell angepasster Plan (${activeProposal.name.split(':')[0]}).`
+        explanation: `Manuell angepasster Plan (${activeProposal.name.split(':')[0]}).`,
+        valid: !evaluation.violations.some((v) => v.type === 'hard')
       };
 
       setProposals(proposals.map((p) => (p.id === activeProposalId ? updatedProposal : p)));
@@ -150,7 +159,7 @@ export const Generator: React.FC<GeneratorProps> = ({
 
     const userText = chatInput.trim();
     const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
+      id: newId('user'),
       sender: 'user',
       text: userText
     };
@@ -167,7 +176,7 @@ export const Generator: React.FC<GeneratorProps> = ({
       onUpdateStudents(result.updatedStudents);
 
       const aiMsg: ChatMessage = {
-        id: `ai-${Date.now()}`,
+        id: newId('ai'),
         sender: 'ai',
         text: `**Ergebnis**: ${result.parsedIntent}\n\n${result.explanation}\n\n*Ich habe die Berechnung des Sitzplans automatisch aktualisiert!*`
       };
@@ -189,7 +198,7 @@ export const Generator: React.FC<GeneratorProps> = ({
         } else {
           setActiveProposalId(propA.id);
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error(err);
       }
     }, 400);
@@ -336,7 +345,7 @@ export const Generator: React.FC<GeneratorProps> = ({
               <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1.25rem', overflowX: 'auto' }}>
                 {proposals.map((p) => {
                   const isActive = p.id === activeProposalId;
-                  const isPrefPerfect = p.score >= 950;
+                  const isPrefPerfect = p.score >= 950 && p.valid;
                   return (
                     <button
                       key={p.id}
@@ -353,17 +362,36 @@ export const Generator: React.FC<GeneratorProps> = ({
                         alignItems: 'flex-start',
                         padding: '0.75rem 1.25rem',
                         gap: '0.25rem',
-                        textAlign: 'left'
+                        textAlign: 'left',
+                        borderColor: !p.valid ? 'var(--danger)' : undefined,
+                        boxShadow: !p.valid ? 'inset 0 0 0 1px var(--danger)' : undefined
                       }}
                     >
-                      <span style={{ fontSize: '0.8rem', opacity: isActive ? 0.9 : 0.6, fontWeight: 600 }}>
+                      <span style={{ fontSize: '0.8rem', opacity: isActive ? 0.9 : 0.6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         {p.name.split(':')[0]}
+                        {!p.valid && (
+                          <span
+                            style={{
+                              fontSize: '0.65rem',
+                              fontWeight: 700,
+                              padding: '0.1rem 0.4rem',
+                              borderRadius: 'var(--radius-sm)',
+                              background: 'var(--danger)',
+                              color: '#fff',
+                              letterSpacing: '0.02em'
+                            }}
+                          >
+                            UNGÜLTIG
+                          </span>
+                        )}
                       </span>
                       <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
                         <span style={{ fontSize: '1.05rem', fontWeight: 700 }}>
                           Score: {p.score} <span style={{ fontSize: '0.8rem', fontWeight: 500 }}>/ 1000</span>
                         </span>
-                        {isPrefPerfect ? (
+                        {!p.valid ? (
+                          <AlertTriangle size={18} style={{ color: isActive ? 'white' : 'var(--danger)' }} />
+                        ) : isPrefPerfect ? (
                           <ShieldCheck size={18} style={{ color: isActive ? 'white' : 'var(--success)' }} />
                         ) : (
                           <Award size={18} style={{ color: isActive ? 'white' : 'var(--accent)' }} />
@@ -376,6 +404,63 @@ export const Generator: React.FC<GeneratorProps> = ({
             )}
           </div>
 
+          {/* Diagnostic Panel: shown when no valid proposal exists */}
+          {proposals.length > 0 && proposals.every((p) => !p.valid) && (() => {
+            // Aggregate hard violations across all proposals (de-duplicated by description+studentId).
+            const hardSet = new Map<string, { studentId: string; description: string }>();
+            proposals.forEach((p) => {
+              p.violations.filter((v) => v.type === 'hard').forEach((v) => {
+                const key = `${v.studentId}|${v.description}`;
+                if (!hardSet.has(key)) {
+                  hardSet.set(key, { studentId: v.studentId, description: v.description });
+                }
+              });
+            });
+            const hardList = Array.from(hardSet.values());
+            return (
+              <div
+                className="card"
+                style={{
+                  marginBottom: 0,
+                  borderLeft: '4px solid var(--danger)',
+                  background: 'var(--surface)'
+                }}
+              >
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0 0 0.5rem', color: 'var(--danger)' }}>
+                  <AlertTriangle size={20} />
+                  Diagnose: Keine gültige Sitzordnung möglich
+                </h3>
+                <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                  Alle drei Vorschläge verletzen mindestens eine harte Regel. Die Pläne werden unten als Diagnose angezeigt — du erkennst, welche Vorgaben sich aktuell nicht erfüllen lassen.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '200px', overflowY: 'auto' }}>
+                  {hardList.map((v, i) => (
+                    <div
+                      key={`${v.studentId}-${i}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        fontSize: '0.85rem',
+                        padding: '0.4rem 0.75rem',
+                        background: 'rgba(239, 68, 68, 0.08)',
+                        color: 'var(--danger)',
+                        borderLeft: '3px solid var(--danger)',
+                        borderRadius: 'var(--radius-sm)'
+                      }}
+                    >
+                      <AlertTriangle size={14} />
+                      <span><strong>{getStudentName(v.studentId)}</strong>: {v.description}</span>
+                    </div>
+                  ))}
+                </div>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '0.75rem', marginBottom: 0 }}>
+                  Tipp: Reduziere widersprüchliche Regeln, ergänze passende Sitzplätze (vorne / am Rand / nahe Tür) im Raumeditor oder lockere einzelne Regeln auf „weich".
+                </p>
+              </div>
+            );
+          })()}
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '2rem' }} className="view-selector-panels">
             {/* Left side: Seating Grid */}
             {activeProposal && (
@@ -387,13 +472,48 @@ export const Generator: React.FC<GeneratorProps> = ({
                   
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }} className="rule-editor-controls">
                     <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
-                      <CheckCircle2 size={18} style={{ color: 'var(--success)' }} />
+                      {activeProposal.valid ? (
+                        <CheckCircle2 size={18} style={{ color: 'var(--success)' }} />
+                      ) : (
+                        <AlertTriangle size={18} style={{ color: 'var(--danger)' }} />
+                      )}
                       Aktiv: {activeProposal.name}
+                      {!activeProposal.valid && (
+                        <span
+                          style={{
+                            fontSize: '0.7rem',
+                            fontWeight: 700,
+                            padding: '0.15rem 0.5rem',
+                            borderRadius: 'var(--radius-sm)',
+                            background: 'var(--danger)',
+                            color: '#fff',
+                            marginLeft: '0.4rem'
+                          }}
+                        >
+                          Ungültig — verletzt harte Regeln
+                        </span>
+                      )}
                     </h4>
                     <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>
                       {selectedSeatId ? '💡 Klicke auf einen zweiten Schüler, um Plätze zu tauschen' : '💡 Wähle einen Schüler aus, um Beziehungen anzuzeigen'}
                     </span>
                   </div>
+
+                  {!activeProposal.valid && (
+                    <div
+                      style={{
+                        padding: '0.85rem 1rem',
+                        marginBottom: '1.25rem',
+                        background: 'rgba(239, 68, 68, 0.08)',
+                        borderLeft: '4px solid var(--danger)',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '0.88rem',
+                        color: 'var(--danger)'
+                      }}
+                    >
+                      <strong>Diagnoseplan:</strong> Dieser Vorschlag verletzt {activeProposal.violations.filter((v) => v.type === 'hard').length} harte Regel(n) und ist nicht einsatzbereit. Sieh dir die markierten Plätze und die Liste „Regelverletzungen" an.
+                    </div>
+                  )}
 
                   <div className="grid-viewport" style={{ padding: '2rem' }}>
                     <svg

@@ -1,4 +1,5 @@
 import type { Student, Rule, SpecialNeed, RuleType } from '../types';
+import { newId } from './ids';
 
 export interface ParseResult {
   parsedIntent: string;
@@ -45,7 +46,7 @@ export function parseNaturalLanguageCommand(
       );
 
       // Add hard 'not_beside' rule
-      const ruleId1 = `ai-rule-notbeside-${s1.id}-${s2.id}-${Date.now()}`;
+      const ruleId1 = newId(`ai-rule-notbeside-${s1.id}-${s2.id}`);
       updatedRules.push({
         id: ruleId1,
         studentId: s1.id,
@@ -84,7 +85,7 @@ export function parseNaturalLanguageCommand(
       );
 
       // Add soft 'beside' rule
-      const ruleId = `ai-rule-beside-${s1.id}-${s2.id}-${Date.now()}`;
+      const ruleId = newId(`ai-rule-beside-${s1.id}-${s2.id}`);
       updatedRules.push({
         id: ruleId,
         studentId: s1.id,
@@ -127,7 +128,7 @@ export function parseNaturalLanguageCommand(
 
           if (!exists) {
             updatedRules.push({
-              id: `ai-noise-${s1.id}-${s2.id}-${Date.now()}`,
+              id: newId(`ai-noise-${s1.id}-${s2.id}`),
               studentId: s1.id,
               type: 'not_beside',
               targetId: s2.id,
@@ -158,17 +159,15 @@ export function parseNaturalLanguageCommand(
     const visionImpaired = currentStudents.filter((s) => s.specialNeeds.includes('Sehschwäche'));
 
     if (visionImpaired.length > 0) {
-      let addedRulesCount = 0;
       visionImpaired.forEach((student) => {
         const hasFrontRule = updatedRules.some((r) => r.studentId === student.id && r.type === 'front');
         if (!hasFrontRule) {
           updatedRules.push({
-            id: `ai-vision-${student.id}-${Date.now()}`,
+            id: newId(`ai-vision-${student.id}`),
             studentId: student.id,
             type: 'front',
             strictness: 'hard',
           });
-          addedRulesCount++;
         }
       });
 
@@ -218,7 +217,7 @@ export function parseNaturalLanguageCommand(
       );
 
       updatedRules.push({
-        id: `ai-pos-${singleStudent.id}-${position}-${Date.now()}`,
+        id: newId(`ai-pos-${singleStudent.id}-${position}`),
         studentId: singleStudent.id,
         type: position,
         strictness: 'hard',

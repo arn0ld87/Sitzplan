@@ -29,22 +29,22 @@ Release-Typ: Web / macOS / beide
 ## 4. Technische Checks Web
 
 ```bash
-npm ci
-npm run lint
-npm run build
+pnpm install --frozen-lockfile
+pnpm lint
+pnpm build
 ```
 
 Falls Tests vorhanden:
 
 ```bash
-npm run test:run
+pnpm test:run
 ```
 
 Checkliste Web:
 
-- [ ] `npm ci` erfolgreich
-- [ ] `npm run lint` erfolgreich
-- [ ] `npm run build` erfolgreich
+- [ ] `pnpm install --frozen-lockfile` erfolgreich
+- [ ] `pnpm lint` erfolgreich
+- [ ] `pnpm build` erfolgreich
 - [ ] Tests erfolgreich, falls vorhanden
 - [ ] keine neuen kritischen Warnings
 - [ ] Web-`dist/` wurde korrekt erzeugt
@@ -170,7 +170,7 @@ Checkliste macOS:
 Optional Web:
 
 ```bash
-npm audit
+pnpm audit
 ```
 
 ## 10. Deployment-Check Web

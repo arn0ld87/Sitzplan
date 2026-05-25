@@ -213,7 +213,7 @@ macos/SitzplanMac/Sources/SitzplanMac/Services/
 ### Web lokal/static
 
 ```text
-npm run build
+pnpm build
  dist/
   └─ statisch ausliefern
 ```
