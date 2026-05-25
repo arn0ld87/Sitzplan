@@ -136,6 +136,22 @@ describe('generateSeatingPlan -- hard `not_beside` constraint', () => {
     const hardViolations = proposal.violations.filter((v) => v.type === 'hard');
     expect(hardViolations.length).toBeGreaterThan(0);
   });
+
+  it('alle 3 Profile invalid bei unlösbarem Setup', () => {
+    // Identical structurally-impossible setup -- run all three presets and
+    // verify every proposal reports valid:false plus a hard violation.
+    const presets = ['balanced', 'focus', 'friendship'] as const;
+    const proposals = presets.map((preset) =>
+      generateSeatingPlan(CONFLICT_STUDENTS, CONFLICT_RULES, CONFLICT_LAYOUT, preset)
+    );
+
+    expect(proposals).toHaveLength(3);
+    expect(proposals.every((p) => p.valid === false)).toBe(true);
+    proposals.forEach((p) => {
+      const hard = p.violations.filter((v) => v.type === 'hard');
+      expect(hard.length).toBeGreaterThan(0);
+    });
+  });
 });
 
 describe('evaluateSeating -- soft `beside` constraint affects score', () => {
