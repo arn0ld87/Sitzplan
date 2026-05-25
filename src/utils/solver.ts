@@ -5,7 +5,8 @@ import type {
   ClassroomLayout,
   SeatingAssignment,
   SeatingViolation,
-  SeatingProposal
+  SeatingProposal,
+  SolverDiagnostics
 } from '../types';
 import { newId } from './ids';
 
@@ -17,6 +18,170 @@ function getDistance(el1: { x: number; y: number }, el2: { x: number; y: number 
 // Helper: Determine if two desks are adjacent (sharing a border or corner)
 function isAdjacent(d1: ClassroomElement, d2: ClassroomElement): boolean {
   return Math.abs(d1.x - d2.x) <= 1.5 && Math.abs(d1.y - d2.y) <= 1.5 && d1.id !== d2.id;
+}
+
+function countAvailableFrontSeats(desks: ClassroomElement[]): number {
+  if (desks.length === 0) return 0;
+  const minY = Math.min(...desks.map((desk) => desk.y));
+  const maxY = Math.max(...desks.map((desk) => desk.y));
+  const rowDepth = maxY - minY || 1;
+  return desks.filter((desk) => desk.y <= minY + rowDepth * 0.35).length;
+}
+
+function countAvailableDoorAccessSeats(desks: ClassroomElement[], doors: ClassroomElement[]): number {
+  if (desks.length === 0) return 0;
+  const minX = Math.min(...desks.map((desk) => desk.x));
+  const maxX = Math.max(...desks.map((desk) => desk.x));
+
+  return desks.filter((desk) => {
+    const minDoorDist = doors.length > 0
+      ? Math.min(...doors.map((door) => getDistance(desk, door)))
+      : 999;
+    return minDoorDist <= 2.5 || desk.x === minX || desk.x === maxX;
+  }).length;
+}
+
+function countAvailableWindowSafeSeats(desks: ClassroomElement[], windows: ClassroomElement[]): number {
+  if (desks.length === 0) return 0;
+  if (windows.length === 0) return desks.length;
+  return desks.filter((desk) => !windows.some((win) => getDistance(desk, win) <= 1.8)).length;
+}
+
+function findContradictoryRules(rules: Rule[]): SolverDiagnostics['contradictoryRules'] {
+  const contradictoryRules: SolverDiagnostics['contradictoryRules'] = [];
+  const hardRules = rules.filter((rule) => rule.strictness === 'hard');
+  const relationRulesByPair = new Map<string, Rule[]>();
+  const positionRulesByStudent = new Map<string, Rule[]>();
+
+  hardRules.forEach((rule) => {
+    if (rule.targetId) {
+      const pairKey = [rule.studentId, rule.targetId].sort().join('|');
+      relationRulesByPair.set(pairKey, [...(relationRulesByPair.get(pairKey) ?? []), rule]);
+    } else {
+      positionRulesByStudent.set(rule.studentId, [
+        ...(positionRulesByStudent.get(rule.studentId) ?? []),
+        rule
+      ]);
+    }
+  });
+
+  relationRulesByPair.forEach((pairRules) => {
+    const hasBeside = pairRules.some((rule) => rule.type === 'beside');
+    const hasNotBeside = pairRules.some((rule) => rule.type === 'not_beside');
+    const hasNear = pairRules.some((rule) => rule.type === 'near');
+    const hasFar = pairRules.some((rule) => rule.type === 'far');
+
+    if (hasBeside && hasNotBeside) {
+      contradictoryRules.push({
+        ruleIds: pairRules
+          .filter((rule) => rule.type === 'beside' || rule.type === 'not_beside')
+          .map((rule) => rule.id),
+        reason: 'Dieselbe Schülerkombination soll gleichzeitig nebeneinander und nicht nebeneinander sitzen.'
+      });
+    }
+
+    if (hasNear && hasFar) {
+      contradictoryRules.push({
+        ruleIds: pairRules
+          .filter((rule) => rule.type === 'near' || rule.type === 'far')
+          .map((rule) => rule.id),
+        reason: 'Dieselbe Schülerkombination soll gleichzeitig nah beieinander und weit voneinander entfernt sitzen.'
+      });
+    }
+  });
+
+  positionRulesByStudent.forEach((studentRules) => {
+    const frontBackRules = studentRules.filter((rule) => rule.type === 'front' || rule.type === 'back');
+    if (
+      frontBackRules.some((rule) => rule.type === 'front') &&
+      frontBackRules.some((rule) => rule.type === 'back')
+    ) {
+      contradictoryRules.push({
+        ruleIds: frontBackRules.map((rule) => rule.id),
+        reason: 'Ein Schüler soll gleichzeitig vorne und hinten sitzen.'
+      });
+    }
+  });
+
+  return contradictoryRules;
+}
+
+export function analyzeSeatingDiagnostics(
+  assignments: SeatingAssignment,
+  students: Student[],
+  rules: Rule[],
+  layout: ClassroomLayout,
+  violations: SeatingViolation[] = []
+): SolverDiagnostics {
+  const desks = layout.elements.filter((el) => el.type === 'desk');
+  const doors = layout.elements.filter((el) => el.type === 'door');
+  const windows = layout.elements.filter((el) => el.type === 'window');
+  const assignedStudentIds = new Set(Object.values(assignments).filter(Boolean));
+
+  const unplacedStudents = students
+    .filter((student) => !assignedStudentIds.has(student.id))
+    .map((student) => student.id);
+
+  const frontRequired = new Set<string>();
+  const doorRequired = new Set<string>();
+  const windowSafeRequired = new Set<string>();
+
+  students.forEach((student) => {
+    if (student.specialNeeds.includes('Sehschwäche') || student.specialNeeds.includes('Hörschwäche')) {
+      frontRequired.add(student.id);
+    }
+    if (student.specialNeeds.includes('Barrierefreiheit')) {
+      doorRequired.add(student.id);
+    }
+    if (student.specialNeeds.includes('Konzentrationsbedarf')) {
+      windowSafeRequired.add(student.id);
+    }
+  });
+
+  rules
+    .filter((rule) => rule.strictness === 'hard')
+    .forEach((rule) => {
+      if (rule.type === 'front' || rule.type === 'near_board') {
+        frontRequired.add(rule.studentId);
+      }
+      if (rule.type === 'near_door') {
+        doorRequired.add(rule.studentId);
+      }
+      if (rule.type === 'not_window') {
+        windowSafeRequired.add(rule.studentId);
+      }
+    });
+
+  const bottlenecks: SolverDiagnostics['bottlenecks'] = [];
+  const frontAvailable = countAvailableFrontSeats(desks);
+  const doorAvailable = countAvailableDoorAccessSeats(desks, doors);
+  const windowSafeAvailable = countAvailableWindowSafeSeats(desks, windows);
+
+  if (frontRequired.size > frontAvailable) {
+    bottlenecks.push({ kind: 'frontRow', required: frontRequired.size, available: frontAvailable });
+  }
+  if (doorRequired.size > doorAvailable) {
+    bottlenecks.push({ kind: 'doorAccess', required: doorRequired.size, available: doorAvailable });
+  }
+  if (windowSafeRequired.size > windowSafeAvailable) {
+    bottlenecks.push({ kind: 'window', required: windowSafeRequired.size, available: windowSafeAvailable });
+  }
+
+  const hardViolations = violations.filter((violation) => violation.type === 'hard');
+
+  return {
+    unplacedStudents,
+    bottlenecks,
+    contradictoryRules: findContradictoryRules(rules),
+    ...(hardViolations.length > 0
+      ? {
+          note: `Es bleiben ${hardViolations.length} harte Konflikt(e): ${hardViolations
+            .slice(0, 3)
+            .map((violation) => violation.description)
+            .join(' ')}`
+        }
+      : {})
+  };
 }
 
 // Core evaluation function
@@ -465,6 +630,7 @@ export function generateSeatingPlan(
     score: bestEval.score,
     violations: bestEval.violations,
     explanation,
-    valid: hardViolations.length === 0
+    valid: hardViolations.length === 0,
+    diagnostics: analyzeSeatingDiagnostics(bestAssignments, students, rules, layout, bestEval.violations)
   };
 }

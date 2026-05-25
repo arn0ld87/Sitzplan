@@ -70,6 +70,20 @@ export interface SeatingViolation {
   targetElementId?: string;
 }
 
+export interface SolverDiagnostics {
+  unplacedStudents: string[];
+  bottlenecks: {
+    kind: 'frontRow' | 'doorAccess' | 'window';
+    required: number;
+    available: number;
+  }[];
+  contradictoryRules: {
+    ruleIds: string[];
+    reason: string;
+  }[];
+  note?: string;
+}
+
 export interface SeatingProposal {
   id: string;
   name: string; // e.g. "Vorschlag A: Ausgewogen"
@@ -79,6 +93,7 @@ export interface SeatingProposal {
   explanation: string;
   // false if proposal has any hard-severity violation; orthogonal to score.
   valid: boolean;
+  diagnostics?: SolverDiagnostics;
 }
 
 export interface SchoolClass {

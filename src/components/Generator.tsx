@@ -14,9 +14,10 @@ import type {
   Student,
   Rule,
   ClassroomLayout,
-  SeatingProposal
+  SeatingProposal,
+  SolverDiagnostics
 } from '../types';
-import { generateSeatingPlan, evaluateSeating } from '../utils/solver';
+import { generateSeatingPlan, evaluateSeating, analyzeSeatingDiagnostics } from '../utils/solver';
 import { parseNaturalLanguageCommand } from '../utils/parser';
 import { newId } from '../utils/ids';
 
@@ -34,6 +35,14 @@ interface ChatMessage {
   sender: 'user' | 'ai';
   text: string;
 }
+
+type BottleneckKind = SolverDiagnostics['bottlenecks'][number]['kind'];
+
+const bottleneckLabels: Record<BottleneckKind, string> = {
+  frontRow: 'Vordere Plätze',
+  doorAccess: 'Tür / Randplätze',
+  window: 'Fensterarme Plätze'
+};
 
 export const Generator: React.FC<GeneratorProps> = ({
   students,
@@ -144,7 +153,8 @@ export const Generator: React.FC<GeneratorProps> = ({
         score: evaluation.score,
         violations: evaluation.violations,
         explanation: `Manuell angepasster Plan (${activeProposal.name.split(':')[0]}).`,
-        valid: !evaluation.violations.some((v) => v.type === 'hard')
+        valid: !evaluation.violations.some((v) => v.type === 'hard'),
+        diagnostics: analyzeSeatingDiagnostics(updatedAssignments, students, rules, layout, evaluation.violations)
       };
 
       setProposals(proposals.map((p) => (p.id === activeProposalId ? updatedProposal : p)));
@@ -210,6 +220,55 @@ export const Generator: React.FC<GeneratorProps> = ({
 
   const getStudentSpecialNeeds = (studentId: string): string[] => {
     return students.find((s) => s.id === studentId)?.specialNeeds || [];
+  };
+
+  const renderDiagnosticsPanel = (proposal: SeatingProposal) => {
+    const diagnostics = proposal.diagnostics;
+    if (!diagnostics) return null;
+
+    const hasDiagnostics =
+      diagnostics.unplacedStudents.length > 0 ||
+      diagnostics.bottlenecks.length > 0 ||
+      diagnostics.contradictoryRules.length > 0 ||
+      Boolean(diagnostics.note);
+
+    if (!hasDiagnostics) return null;
+
+    return (
+      <div className="diagnostics-panel">
+        <div className="diagnostics-panel-header">
+          <AlertTriangle size={16} />
+          <span>Solver-Diagnose</span>
+        </div>
+
+        <div className="diagnostics-grid">
+          {diagnostics.bottlenecks.map((bottleneck) => (
+            <div className="diagnostics-row" key={bottleneck.kind}>
+              <span>{bottleneckLabels[bottleneck.kind]}</span>
+              <strong>{bottleneck.required} gebraucht / {bottleneck.available} verfügbar</strong>
+            </div>
+          ))}
+
+          {diagnostics.contradictoryRules.map((conflict, index) => (
+            <div className="diagnostics-row" key={`${conflict.ruleIds.join('-')}-${index}`}>
+              <span>Widerspruch</span>
+              <strong>{conflict.reason}</strong>
+            </div>
+          ))}
+
+          {diagnostics.unplacedStudents.map((studentId) => (
+            <div className="diagnostics-row" key={studentId}>
+              <span>Nicht platziert</span>
+              <strong>{getStudentName(studentId)}</strong>
+            </div>
+          ))}
+        </div>
+
+        {diagnostics.note && (
+          <p className="diagnostics-note">{diagnostics.note}</p>
+        )}
+      </div>
+    );
   };
 
   // SVG coordinates lookup helpers
@@ -689,6 +748,8 @@ export const Generator: React.FC<GeneratorProps> = ({
                     >
                       {activeProposal.explanation}
                     </p>
+
+                    {renderDiagnosticsPanel(activeProposal)}
 
                     <h4 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>Regelverletzungen</h4>
                     {activeProposal.violations.length === 0 ? (

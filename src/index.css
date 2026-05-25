@@ -622,6 +622,57 @@ textarea.form-input {
 .badge-danger  { background: var(--red-tint);    color: var(--red); }
 .badge-success { background: var(--green-tint);  color: var(--green); }
 
+/* Solver diagnostics */
+.diagnostics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  margin-bottom: var(--s-5);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--orange);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.diagnostics-panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--orange);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.diagnostics-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.diagnostics-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.diagnostics-row strong {
+  color: var(--ink);
+  font-weight: 650;
+  text-align: right;
+}
+
+.diagnostics-note {
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 /* =============================================================
    Klassenraum – Grid Viewport / SVG-Elemente
    ============================================================= */
