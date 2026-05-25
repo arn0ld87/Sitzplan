@@ -996,6 +996,156 @@ textarea.form-input {
 }
 
 /* =============================================================
+   Room Capacity – M3 Slice 1
+   ============================================================= */
+
+.room-capacity-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-4);
+  padding: var(--s-2) var(--s-3);
+  margin-bottom: var(--s-3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.room-capacity-stats.is-over {
+  border-color: var(--orange);
+  background: var(--orange-tint);
+}
+
+.room-capacity-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.room-capacity-stat strong {
+  color: var(--text-main);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.room-capacity-warning {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  margin-bottom: var(--s-4);
+  background: var(--orange-tint);
+  color: var(--orange);
+  border-left: 4px solid var(--orange);
+  border-radius: var(--r-sm, 6px);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.room-capacity-warning strong {
+  font-weight: 700;
+}
+
+.room-capacity-warning svg {
+  flex-shrink: 0;
+}
+
+/* =============================================================
+   Room Collision – M3 Slice 2
+   ============================================================= */
+
+.room-capacity-stat.is-collision {
+  color: var(--danger);
+}
+
+.room-capacity-stat.is-collision strong {
+  color: var(--danger);
+}
+
+.classroom-svg-element .svg-desk.is-colliding,
+.classroom-svg-element .svg-board.is-colliding,
+.classroom-svg-element .svg-window.is-colliding,
+.classroom-svg-element .svg-door.is-colliding,
+.classroom-svg-element .svg-cupboard.is-colliding,
+.classroom-svg-element .svg-furniture.is-colliding {
+  stroke: var(--danger);
+  stroke-width: 2.5;
+  stroke-dasharray: 5 3;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .classroom-svg-element .svg-desk.is-colliding,
+  .classroom-svg-element .svg-board.is-colliding,
+  .classroom-svg-element .svg-window.is-colliding,
+  .classroom-svg-element .svg-door.is-colliding,
+  .classroom-svg-element .svg-cupboard.is-colliding,
+  .classroom-svg-element .svg-furniture.is-colliding {
+    animation: collision-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes collision-pulse {
+  0%, 100% { stroke-opacity: 1; }
+  50%      { stroke-opacity: 0.45; }
+}
+
+/* =============================================================
+   Empty States – M3 Slice 5
+   ============================================================= */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--s-2);
+  padding: var(--s-6) var(--s-4);
+  color: var(--text-muted);
+}
+
+.empty-state-sm {
+  padding: var(--s-4) var(--s-3);
+}
+
+.empty-state-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  margin-bottom: var(--s-2);
+}
+
+.empty-state-sm .empty-state-icon {
+  width: 44px;
+  height: 44px;
+}
+
+.empty-state-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.empty-state-description {
+  margin: 0;
+  max-width: 38ch;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.empty-state .btn {
+  margin-top: var(--s-3);
+}
+
+/* =============================================================
    Motion – Reduced
    ============================================================= */
 

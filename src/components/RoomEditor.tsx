@@ -1,18 +1,31 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   RotateCw,
   Trash2,
   Maximize2,
   Grid,
-  Compass
+  Compass,
+  Users,
+  AlertTriangle,
+  Undo2,
+  Redo2
 } from 'lucide-react';
 import type { ClassroomElement, ClassroomLayout, ElementType } from '../types';
 import { MOCK_CLASSROOM_LAYOUT } from '../utils/mockData';
 import { newId } from '../utils/ids';
+import { countDesks } from '../utils/layoutCapacity';
+import { findOverlappingIds, wouldOverlap } from '../utils/layoutCollision';
+import { getKeyboardAction, isEditableTarget } from '../utils/editorKeymap';
+import { EmptyState } from './EmptyState';
 
 interface RoomEditorProps {
   layout: ClassroomLayout;
   onUpdateLayout: (layout: ClassroomLayout) => void;
+  studentCount?: number;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
 }
 
 const ELEMENT_CATALOG: { type: ElementType; label: string; w: number; h: number; color: string }[] = [
@@ -26,8 +39,18 @@ const ELEMENT_CATALOG: { type: ElementType; label: string; w: number; h: number;
 
 export const RoomEditor: React.FC<RoomEditorProps> = ({
   layout,
-  onUpdateLayout
+  onUpdateLayout,
+  studentCount = 0,
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false
 }) => {
+  const deskCount = countDesks(layout);
+  const overCapacity = studentCount > deskCount;
+  const deficit = overCapacity ? studentCount - deskCount : 0;
+  const collidingIds = findOverlappingIds(layout);
+  const collisionCount = collidingIds.size;
   const [selectedTool, setSelectedTool] = useState<ElementType | 'select'>('select');
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   
@@ -53,25 +76,10 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
     onUpdateLayout({ ...layout, height: newHeight });
   };
 
-  // Check if position overlaps existing element
-  const checkOverlap = (el: Omit<ClassroomElement, 'id'>, ignoreId?: string): boolean => {
-    return layout.elements.some((other) => {
-      if (other.id === ignoreId) return false;
-      
-      // Determine bounding boxes considering size w and h
-      const elRight = el.x + el.w;
-      const elBottom = el.y + el.h;
-      const otherRight = other.x + other.w;
-      const otherBottom = other.y + other.h;
-
-      return !(
-        el.x >= otherRight ||
-        elRight <= other.x ||
-        el.y >= otherBottom ||
-        elBottom <= other.y
-      );
-    });
-  };
+  const checkOverlap = (
+    el: Pick<ClassroomElement, 'x' | 'y' | 'w' | 'h'>,
+    ignoreId?: string
+  ): boolean => wouldOverlap(layout, el, ignoreId);
 
   // Add Element on Grid Click
   const handleGridClick = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -242,6 +250,84 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
     setSelectedElementId(null);
   };
 
+  // Nudge selected element by one grid cell (used by arrow keys)
+  const handleNudgeSelected = (dx: number, dy: number) => {
+    if (!selectedElement) return;
+    const targetX = Math.max(0, Math.min(layout.width - selectedElement.w, selectedElement.x + dx));
+    const targetY = Math.max(0, Math.min(layout.height - selectedElement.h, selectedElement.y + dy));
+    if (targetX === selectedElement.x && targetY === selectedElement.y) return;
+    const proposed = { ...selectedElement, x: targetX, y: targetY };
+    if (checkOverlap(proposed, selectedElement.id)) return;
+    onUpdateLayout({
+      ...layout,
+      elements: layout.elements.map((el) =>
+        el.id === selectedElement.id ? proposed : el
+      )
+    });
+  };
+
+  // Keep the always-changing per-render handlers reachable from the keydown
+  // listener without re-binding it on every render. The listener reads from
+  // actionsRef.current, which we refresh in a layout effect below.
+  const actionsRef = useRef({
+    delete: handleDeleteSelected,
+    rotate: handleRotateSelected,
+    nudge: handleNudgeSelected,
+    undo: onUndo,
+    redo: onRedo,
+    canUndo,
+    canRedo,
+    hasSelection: Boolean(selectedElementId),
+    canRotate: Boolean(selectedElement)
+  });
+  useEffect(() => {
+    actionsRef.current = {
+      delete: handleDeleteSelected,
+      rotate: handleRotateSelected,
+      nudge: handleNudgeSelected,
+      undo: onUndo,
+      redo: onRedo,
+      canUndo,
+      canRedo,
+      hasSelection: Boolean(selectedElementId),
+      canRotate: Boolean(selectedElement)
+    };
+  });
+
+  // Global keyboard shortcuts while the room editor is mounted.
+  // Deps are intentionally empty: the listener reads everything through
+  // actionsRef (refreshed each render) and setSelectedElementId is stable.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return;
+      const action = getKeyboardAction(e);
+      if (!action) return;
+      const a = actionsRef.current;
+      switch (action.type) {
+        case 'undo':
+          if (a.undo && a.canUndo) { e.preventDefault(); a.undo(); }
+          return;
+        case 'redo':
+          if (a.redo && a.canRedo) { e.preventDefault(); a.redo(); }
+          return;
+        case 'deselect':
+          if (a.hasSelection) { e.preventDefault(); setSelectedElementId(null); }
+          return;
+        case 'delete':
+          if (a.hasSelection) { e.preventDefault(); a.delete(); }
+          return;
+        case 'rotate':
+          if (a.canRotate) { e.preventDefault(); a.rotate(); }
+          return;
+        case 'move':
+          if (a.canRotate) { e.preventDefault(); a.nudge(action.dx, action.dy); }
+          return;
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
   // Label update selected element
   const handleLabelChange = (newLabel: string) => {
     if (!selectedElementId) return;
@@ -284,6 +370,30 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
             </h3>
 
             <div style={{ display: 'flex', gap: '0.5rem' }}>
+              {onUndo && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={onUndo}
+                  disabled={!canUndo}
+                  title="Rückgängig"
+                  aria-label="Letzte Änderung rückgängig machen"
+                >
+                  <Undo2 size={14} />
+                </button>
+              )}
+              {onRedo && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={onRedo}
+                  disabled={!canRedo}
+                  title="Wiederherstellen"
+                  aria-label="Letzte Änderung wiederherstellen"
+                >
+                  <Redo2 size={14} />
+                </button>
+              )}
               <button className="btn btn-secondary btn-sm" onClick={handleLoadStandardDesks}>
                 Standard-Layout laden
               </button>
@@ -292,6 +402,47 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
               </button>
             </div>
           </div>
+
+          <div
+            className={`room-capacity-stats ${overCapacity || collisionCount > 0 ? 'is-over' : ''}`}
+            role="status"
+            aria-live="polite"
+          >
+            <span className="room-capacity-stat">
+              <Grid size={14} aria-hidden="true" />
+              <strong>{deskCount}</strong> {deskCount === 1 ? 'Sitzplatz' : 'Sitzplätze'}
+            </span>
+            <span className="room-capacity-stat">
+              <Users size={14} aria-hidden="true" />
+              <strong>{studentCount}</strong> {studentCount === 1 ? 'Schüler:in' : 'Schüler:innen'}
+            </span>
+            {collisionCount > 0 && (
+              <span className="room-capacity-stat is-collision">
+                <AlertTriangle size={14} aria-hidden="true" />
+                <strong>{collisionCount}</strong> {collisionCount === 1 ? 'Kollision' : 'Kollisionen'}
+              </span>
+            )}
+          </div>
+
+          {overCapacity && (
+            <div className="room-capacity-warning" role="alert">
+              <AlertTriangle size={18} aria-hidden="true" />
+              <span>
+                Zu wenige Sitzplätze: <strong>{deficit}</strong> {deficit === 1 ? 'Schüler:in hat' : 'Schüler:innen haben'} keinen Platz.
+                Füge weitere Schülerpulte hinzu oder reduziere die Klassengröße.
+              </span>
+            </div>
+          )}
+
+          {layout.elements.length === 0 && (
+            <EmptyState
+              icon={Grid}
+              size="sm"
+              title="Noch leerer Raum"
+              description="Wähle rechts ein Objekt aus dem Katalog und klicke ins Raster, um es zu platzieren — oder lade das Standard-Layout."
+              action={{ label: 'Standard-Layout laden', onClick: handleLoadStandardDesks }}
+            />
+          )}
 
           <div className="grid-viewport">
             <svg
@@ -327,6 +478,7 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
               {/* Placed Elements */}
               {layout.elements.map((el) => {
                 const isSelected = selectedElementId === el.id;
+                const isColliding = collidingIds.has(el.id);
                 const radius = 6;
                 const px = el.x * cellSize + 2;
                 const py = el.y * cellSize + 2;
@@ -343,7 +495,7 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
                 return (
                   <g
                     key={el.id}
-                    className="classroom-svg-element"
+                    className={`classroom-svg-element ${isColliding ? 'is-colliding' : ''}`}
                     onPointerDown={(e) => handlePointerDown(e, el)}
                     onPointerMove={(e) => handlePointerMove(e, el.id)}
                     onPointerUp={handlePointerUp}
@@ -351,7 +503,7 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
                   >
                     {/* Bounding shape */}
                     <rect
-                      className={`${colorClass} ${isSelected ? 'selected' : ''}`}
+                      className={`${colorClass} ${isSelected ? 'selected' : ''} ${isColliding ? 'is-colliding' : ''}`}
                       x={px}
                       y={py}
                       width={pw}

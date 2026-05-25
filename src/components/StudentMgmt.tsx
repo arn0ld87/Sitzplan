@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, UserPlus, ShieldAlert, Edit2, X, Check } from 'lucide-react';
+import { Plus, Trash2, UserPlus, ShieldAlert, Edit2, X, Check, Users } from 'lucide-react';
 import type { Student, SpecialNeed, SchoolClass } from '../types';
+import { EmptyState } from './EmptyState';
 
 interface StudentMgmtProps {
   activeClass: SchoolClass | undefined;
@@ -103,9 +104,12 @@ export const StudentMgmt: React.FC<StudentMgmtProps> = ({
           </h3>
           
           {activeClass.students.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '2rem' }}>
-              Noch keine Schüler in dieser Klasse. Nutze das rechte Formular zum Hinzufügen!
-            </p>
+            <EmptyState
+              icon={Users}
+              size="sm"
+              title="Noch keine Schüler:innen"
+              description="Nutze das rechte Formular, um eine:n Schüler:in mit Namen und optionalem Förderbedarf hinzuzufügen."
+            />
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
