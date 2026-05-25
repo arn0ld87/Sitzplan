@@ -34,17 +34,17 @@ function App() {
   });
   const [layout, setLayout] = useState<ClassroomLayout>(() => loadLayout() ?? DEFAULT_LAYOUT);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'students' | 'rules' | 'room' | 'generator'>('dashboard');
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window === 'undefined') return 'light';
+    const saved = localStorage.getItem('sitzplaner_theme') as 'light' | 'dark' | null;
+    if (saved) return saved;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
 
-  // Theme: initial load (separate from versioned storage — cosmetic, no data-loss risk)
+  // Apply data-theme attribute whenever theme changes (covers initial + toggle).
   useEffect(() => {
-    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    const savedTheme = localStorage.getItem('sitzplaner_theme') as 'light' | 'dark' | null;
-
-    const activeTheme = savedTheme || systemTheme;
-    setTheme(activeTheme);
-    document.documentElement.setAttribute('data-theme', activeTheme);
-  }, []);
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
   // Persist classes only after user mutation (skip initial mount to avoid
   // overwriting existing data when load returned an empty default due to
@@ -68,24 +68,19 @@ function App() {
     saveLayout(layout);
   }, [layout]);
 
-  // Theme Toggler
+  // Theme Toggler — data-theme attribute is synced by the useEffect above.
   const toggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light';
     setTheme(nextTheme);
     localStorage.setItem('sitzplaner_theme', nextTheme);
-    document.documentElement.setAttribute('data-theme', nextTheme);
   };
 
   // Example Preloader Logic
   const handleLoadExampleClass = () => {
     const hasExisting = classes.some((c) => c.id === MOCK_CLASS.id);
-    let updatedClasses = [...classes];
-
-    if (!hasExisting) {
-      updatedClasses = [MOCK_CLASS, ...classes];
-    } else {
-      updatedClasses = classes.map((c) => (c.id === MOCK_CLASS.id ? MOCK_CLASS : c));
-    }
+    const updatedClasses = hasExisting
+      ? classes.map((c) => (c.id === MOCK_CLASS.id ? MOCK_CLASS : c))
+      : [MOCK_CLASS, ...classes];
 
     setClasses(updatedClasses);
     setLayout(MOCK_CLASSROOM_LAYOUT);

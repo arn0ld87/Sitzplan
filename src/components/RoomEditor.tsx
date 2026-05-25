@@ -502,7 +502,7 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
   function handlePointerMove(e: React.PointerEvent<SVGGElement>, elId: string) {
     handleElementPointerMove(e, elId);
   }
-  function handlePointerUp(_e: React.PointerEvent<SVGGElement>) {
+  function handlePointerUp() {
     handleElementPointerUp();
   }
 };

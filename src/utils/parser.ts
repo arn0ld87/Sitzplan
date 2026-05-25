@@ -159,7 +159,6 @@ export function parseNaturalLanguageCommand(
     const visionImpaired = currentStudents.filter((s) => s.specialNeeds.includes('Sehschwäche'));
 
     if (visionImpaired.length > 0) {
-      let addedRulesCount = 0;
       visionImpaired.forEach((student) => {
         const hasFrontRule = updatedRules.some((r) => r.studentId === student.id && r.type === 'front');
         if (!hasFrontRule) {
@@ -169,7 +168,6 @@ export function parseNaturalLanguageCommand(
             type: 'front',
             strictness: 'hard',
           });
-          addedRulesCount++;
         }
       });
 

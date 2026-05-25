@@ -89,15 +89,22 @@ export const Generator: React.FC<GeneratorProps> = ({
       setProposals([propA, propB, propC]);
       setActiveProposalId(propA.id);
       setSelectedSeatId(null);
-    } catch (err: any) {
-      alert(err.message || 'Fehler beim Berechnen des Sitzplans.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Fehler beim Berechnen des Sitzplans.';
+      alert(message);
     }
   };
 
+  // Auto-calc once when entering with students but no proposals yet.
+  // Deferred to a microtask so the state update doesn't fire synchronously
+  // inside the effect; deps intentionally narrow so we don't restart on
+  // every render of proposals/handleCalculatePlans.
   useEffect(() => {
     if (students.length > 0 && proposals.length === 0) {
-      handleCalculatePlans();
+      const t = setTimeout(() => handleCalculatePlans(), 0);
+      return () => clearTimeout(t);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [students]);
 
   const activeProposal = proposals.find((p) => p.id === activeProposalId);
@@ -191,7 +198,7 @@ export const Generator: React.FC<GeneratorProps> = ({
         } else {
           setActiveProposalId(propA.id);
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error(err);
       }
     }, 400);
