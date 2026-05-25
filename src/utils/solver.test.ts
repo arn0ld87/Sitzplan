@@ -138,8 +138,6 @@ describe('generateSeatingPlan -- hard `not_beside` constraint', () => {
   });
 
   it('alle 3 Profile invalid bei unlösbarem Setup', () => {
-    // Identical structurally-impossible setup -- run all three presets and
-    // verify every proposal reports valid:false plus a hard violation.
     const presets = ['balanced', 'focus', 'friendship'] as const;
     const proposals = presets.map((preset) =>
       generateSeatingPlan(CONFLICT_STUDENTS, CONFLICT_RULES, CONFLICT_LAYOUT, preset)
@@ -151,6 +149,66 @@ describe('generateSeatingPlan -- hard `not_beside` constraint', () => {
       const hard = p.violations.filter((v) => v.type === 'hard');
       expect(hard.length).toBeGreaterThan(0);
     });
+  });
+
+  it('reports contradictory hard relationship rules in diagnostics', () => {
+    const rules: Rule[] = [
+      {
+        id: 'rule-beside-a-b',
+        studentId: 'stu-a',
+        type: 'beside',
+        targetId: 'stu-b',
+        strictness: 'hard'
+      },
+      {
+        id: 'rule-not-beside-a-b',
+        studentId: 'stu-a',
+        type: 'not_beside',
+        targetId: 'stu-b',
+        strictness: 'hard'
+      }
+    ];
+
+    const proposal = generateSeatingPlan(
+      CONFLICT_STUDENTS,
+      rules,
+      CONFLICT_LAYOUT,
+      'balanced'
+    );
+
+    expect(proposal.diagnostics?.contradictoryRules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ruleIds: expect.arrayContaining(['rule-beside-a-b', 'rule-not-beside-a-b'])
+        })
+      ])
+    );
+  });
+
+  it('reports front-row bottlenecks in diagnostics', () => {
+    const students = [
+      { id: 'stu-1', name: 'Ari', specialNeeds: ['Sehschwäche' as const] },
+      { id: 'stu-2', name: 'Bea', specialNeeds: ['Sehschwäche' as const] },
+      { id: 'stu-3', name: 'Can', specialNeeds: ['Sehschwäche' as const] }
+    ];
+    const layout: ClassroomLayout = {
+      width: 6,
+      height: 6,
+      elements: [
+        { id: 'board-front', type: 'board', x: 1, y: 0, w: 4, h: 1, rotation: 0 },
+        { id: 'desk-front-a', type: 'desk', x: 1, y: 1, w: 1, h: 1, rotation: 0 },
+        { id: 'desk-front-b', type: 'desk', x: 3, y: 1, w: 1, h: 1, rotation: 0 },
+        { id: 'desk-back', type: 'desk', x: 2, y: 5, w: 1, h: 1, rotation: 0 }
+      ]
+    };
+
+    const proposal = generateSeatingPlan(students, [], layout, 'balanced');
+
+    expect(proposal.diagnostics?.bottlenecks).toEqual(
+      expect.arrayContaining([
+        { kind: 'frontRow', required: 3, available: 2 }
+      ])
+    );
   });
 });
 
