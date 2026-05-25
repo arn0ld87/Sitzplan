@@ -266,37 +266,67 @@ export const RoomEditor: React.FC<RoomEditorProps> = ({
     });
   };
 
-  // Global keyboard shortcuts while the room editor is mounted
+  // Keep the always-changing per-render handlers reachable from the keydown
+  // listener without re-binding it on every render. The listener reads from
+  // actionsRef.current, which we refresh in a layout effect below.
+  const actionsRef = useRef({
+    delete: handleDeleteSelected,
+    rotate: handleRotateSelected,
+    nudge: handleNudgeSelected,
+    undo: onUndo,
+    redo: onRedo,
+    canUndo,
+    canRedo,
+    hasSelection: Boolean(selectedElementId),
+    canRotate: Boolean(selectedElement)
+  });
+  useEffect(() => {
+    actionsRef.current = {
+      delete: handleDeleteSelected,
+      rotate: handleRotateSelected,
+      nudge: handleNudgeSelected,
+      undo: onUndo,
+      redo: onRedo,
+      canUndo,
+      canRedo,
+      hasSelection: Boolean(selectedElementId),
+      canRotate: Boolean(selectedElement)
+    };
+  });
+
+  // Global keyboard shortcuts while the room editor is mounted.
+  // Deps are intentionally empty: the listener reads everything through
+  // actionsRef (refreshed each render) and setSelectedElementId is stable.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (isEditableTarget(e.target)) return;
       const action = getKeyboardAction(e);
       if (!action) return;
+      const a = actionsRef.current;
       switch (action.type) {
         case 'undo':
-          if (onUndo && canUndo) { e.preventDefault(); onUndo(); }
+          if (a.undo && a.canUndo) { e.preventDefault(); a.undo(); }
           return;
         case 'redo':
-          if (onRedo && canRedo) { e.preventDefault(); onRedo(); }
+          if (a.redo && a.canRedo) { e.preventDefault(); a.redo(); }
           return;
         case 'deselect':
-          if (selectedElementId) { e.preventDefault(); setSelectedElementId(null); }
+          if (a.hasSelection) { e.preventDefault(); setSelectedElementId(null); }
           return;
         case 'delete':
-          if (selectedElementId) { e.preventDefault(); handleDeleteSelected(); }
+          if (a.hasSelection) { e.preventDefault(); a.delete(); }
           return;
         case 'rotate':
-          if (selectedElement) { e.preventDefault(); handleRotateSelected(); }
+          if (a.canRotate) { e.preventDefault(); a.rotate(); }
           return;
         case 'move':
-          if (selectedElement) { e.preventDefault(); handleNudgeSelected(action.dx, action.dy); }
+          if (a.canRotate) { e.preventDefault(); a.nudge(action.dx, action.dy); }
           return;
       }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedElementId, layout, canUndo, canRedo, onUndo, onRedo]);
+  }, []);
 
   // Label update selected element
   const handleLabelChange = (newLabel: string) => {
