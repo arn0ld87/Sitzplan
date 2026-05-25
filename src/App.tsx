@@ -17,6 +17,7 @@ import { Generator } from './components/Generator';
 import { MOCK_CLASS, MOCK_CLASSROOM_LAYOUT } from './utils/mockData';
 import { loadClasses, loadLayout, saveClasses, saveLayout } from './utils/storage';
 import { newId } from './utils/ids';
+import { cleanRulesForDeletedStudent } from './utils/cleanup';
 import './index.css';
 
 const DEFAULT_LAYOUT: ClassroomLayout = {
@@ -168,7 +169,7 @@ function App() {
           ...c,
           students: c.students.filter((s) => s.id !== studentId),
           // filter out dangling rules referencing deleted student
-          rules: c.rules.filter((r) => r.studentId !== studentId && r.targetId !== studentId)
+          rules: cleanRulesForDeletedStudent(c.rules, studentId)
         };
       }
       return c;
