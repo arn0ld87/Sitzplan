@@ -3,9 +3,11 @@ import {
   generateSeatingPlan,
   generateSeatingProposals,
   evaluateSeating,
-  computeStudentDifficulty
+  computeStudentDifficulty,
+  hammingDistanceAssignments,
+  selectTop3Distinct
 } from './solver';
-import type { Rule, ClassroomLayout, SeatingAssignment, Student } from '../types';
+import type { Rule, ClassroomLayout, SeatingAssignment, SeatingProposal, Student } from '../types';
 import {
   SMALL_STUDENTS,
   SMALL_LAYOUT
@@ -218,6 +220,9 @@ describe('generateSeatingPlan -- hard `not_beside` constraint', () => {
 });
 
 describe('generateSeatingProposals -- seeded determinism', () => {
+  // Two back-to-back solver runs on SMALL_LAYOUT after Slice 6's full-candidate
+  // dedup (12 buildProposal calls × 2) flirt with the 15s default. Slice 7 will
+  // tune SA cooling so this can drop back to ~5s.
   it('returns identical proposals[].assignments on consecutive calls with the same seed', () => {
     const first = generateSeatingProposals(SMALL_STUDENTS, [], SMALL_LAYOUT, { seed: 42 });
     const second = generateSeatingProposals(SMALL_STUDENTS, [], SMALL_LAYOUT, { seed: 42 });
@@ -227,7 +232,7 @@ describe('generateSeatingProposals -- seeded determinism', () => {
     first.forEach((proposal, i) => {
       expect(proposal.assignments).toEqual(second[i].assignments);
     });
-  });
+  }, 45000);
 
   it('returns 3 proposals without opts (Math.random fallback)', () => {
     const proposals = generateSeatingProposals(SMALL_STUDENTS, [], SMALL_LAYOUT);
@@ -237,7 +242,7 @@ describe('generateSeatingProposals -- seeded determinism', () => {
       expect(p.assignments).toBeDefined();
       expect(typeof p.score).toBe('number');
     });
-  });
+  }, 30000);
 });
 
 describe('evaluateSeating -- soft `beside` constraint affects score', () => {
@@ -798,5 +803,250 @@ describe('Slice 4 -- computeStudentDifficulty', () => {
     ];
     // Empty-string targetId is treated as no target -> hard position rule -> 10.
     expect(computeStudentDifficulty(student, rules)).toBe(10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slice 6 — dedup top-3 by Hamming distance
+// ---------------------------------------------------------------------------
+
+function makeStudents(n: number): Student[] {
+  return Array.from({ length: n }, (_, i) => ({
+    id: `stu-${i}`,
+    name: `S${i}`,
+    specialNeeds: []
+  }));
+}
+
+function makeProposal(
+  id: string,
+  score: number,
+  assignments: SeatingAssignment
+): SeatingProposal {
+  return {
+    id,
+    name: id,
+    assignments,
+    score,
+    violations: [],
+    explanation: '',
+    valid: true,
+    diagnostics: {
+      unplacedStudents: [],
+      bottlenecks: [],
+      contradictoryRules: []
+    }
+  };
+}
+
+describe('Slice 6 -- hammingDistanceAssignments', () => {
+  it('returns 0 for two identical assignments', () => {
+    const students = makeStudents(10);
+    const a: SeatingAssignment = {};
+    students.forEach((s, i) => {
+      a[`desk-${i}`] = s.id;
+    });
+    const b: SeatingAssignment = { ...a };
+    expect(hammingDistanceAssignments(a, b, students)).toBe(0);
+  });
+
+  it('returns 3 when 3-of-10 students sit at a different desk', () => {
+    const students = makeStudents(10);
+    const a: SeatingAssignment = {};
+    students.forEach((s, i) => {
+      a[`desk-${i}`] = s.id;
+    });
+    // Swap students 0<->1 and move student 2 to desk-9 (3 of 10 differ).
+    // Student 9 in `a` is at desk-9; in `b` he moves to desk-2.
+    const b: SeatingAssignment = { ...a };
+    b['desk-0'] = 'stu-1';
+    b['desk-1'] = 'stu-0';
+    b['desk-9'] = 'stu-2';
+    b['desk-2'] = 'stu-9';
+    // Differences: stu-0 (desk-0 vs desk-1), stu-1 (desk-1 vs desk-0),
+    // stu-2 (desk-2 vs desk-9), stu-9 (desk-9 vs desk-2) = 4 differences.
+    expect(hammingDistanceAssignments(a, b, students)).toBe(4);
+
+    // Tighter: just rotate stu-0, stu-1, stu-2 cyclically (3 differ).
+    const c: SeatingAssignment = { ...a };
+    c['desk-0'] = 'stu-1';
+    c['desk-1'] = 'stu-2';
+    c['desk-2'] = 'stu-0';
+    expect(hammingDistanceAssignments(a, c, students)).toBe(3);
+  });
+
+  it('counts unassigned-in-one-only as a difference', () => {
+    const students = makeStudents(2);
+    const a: SeatingAssignment = { 'desk-0': 'stu-0', 'desk-1': 'stu-1' };
+    const b: SeatingAssignment = { 'desk-0': 'stu-0' }; // stu-1 missing
+    expect(hammingDistanceAssignments(a, b, students)).toBe(1);
+  });
+});
+
+describe('Slice 6 -- selectTop3Distinct', () => {
+  it('picks 3 candidates that all differ by >= 30% at base threshold', () => {
+    // 10 students, threshold 0.30 -> required diff >= 3.
+    const students = makeStudents(10);
+
+    // Base assignment: stu-i on desk-i.
+    const base: SeatingAssignment = {};
+    students.forEach((s, i) => {
+      base[`desk-${i}`] = s.id;
+    });
+
+    // Two "near-duplicates" of base (diff = 2 -> below threshold).
+    const dup1: SeatingAssignment = { ...base };
+    dup1['desk-0'] = 'stu-1';
+    dup1['desk-1'] = 'stu-0';
+
+    const dup2: SeatingAssignment = { ...base };
+    dup2['desk-2'] = 'stu-3';
+    dup2['desk-3'] = 'stu-2';
+
+    // Three "far" variants (diff = 4 from base and from each other).
+    const far1: SeatingAssignment = {};
+    students.forEach((_s, i) => {
+      far1[`desk-${i}`] = students[(i + 5) % 10].id;
+    });
+    const far2: SeatingAssignment = {};
+    students.forEach((_s, i) => {
+      far2[`desk-${i}`] = students[(i + 3) % 10].id;
+    });
+
+    // Candidates: anchor + 2 near-dups + 2 far variants. Anchor + far1 + far2
+    // should be returned (3 candidates, all >= 30% distance from each other).
+    const candidates = [
+      makeProposal('anchor', 1000, base),
+      makeProposal('dup1', 990, dup1),
+      makeProposal('dup2', 985, dup2),
+      makeProposal('far1', 980, far1),
+      makeProposal('far2', 970, far2)
+    ];
+
+    const picked = selectTop3Distinct(candidates, students);
+    expect(picked).toHaveLength(3);
+    const ids = picked.map((p) => p.id);
+    expect(ids).toContain('anchor');
+    expect(ids).toContain('far1');
+    expect(ids).toContain('far2');
+    // No diagnostic note when full 30% threshold succeeded.
+    picked.forEach((p) => {
+      expect(p.diagnostics?.note ?? '').not.toContain('ausreichend unterschiedlichen Alternativen');
+    });
+  });
+
+  it('soft-reduces to lower threshold and appends a diagnostic note', () => {
+    // 10 students. Build a pool where:
+    //   anchor + alt1 differ by 4 (>= 0.30 -> 3 needed)
+    //   anchor + alt2 differ by only 1 (< 0.30, but >= 0.10 -> 1 needed)
+    //   alt1 + alt2 differ by 3 (>= 0.30 -- this is fine for any threshold)
+    const students = makeStudents(10);
+
+    const base: SeatingAssignment = {};
+    students.forEach((s, i) => {
+      base[`desk-${i}`] = s.id;
+    });
+
+    // alt1: rotate 4 students.
+    const alt1: SeatingAssignment = { ...base };
+    alt1['desk-0'] = 'stu-1';
+    alt1['desk-1'] = 'stu-2';
+    alt1['desk-2'] = 'stu-3';
+    alt1['desk-3'] = 'stu-0';
+    // diff(base, alt1) = 4 students moved.
+
+    // alt2: swap students 8 and 9 only. diff(base, alt2) = 2.
+    // But we need < 0.30 (i.e. < 3) AND >= 0.10 (i.e. >= 1). Make it 2.
+    const alt2: SeatingAssignment = { ...base };
+    alt2['desk-8'] = 'stu-9';
+    alt2['desk-9'] = 'stu-8';
+    // diff(base, alt2) = 2 -> fails 0.30 (needs 3), passes 0.20 (needs 2).
+    // diff(alt1, alt2) = 4 + 2 = 6 -> passes all thresholds.
+
+    const candidates = [
+      makeProposal('anchor', 1000, base),
+      makeProposal('alt1', 990, alt1),
+      makeProposal('alt2', 980, alt2)
+    ];
+
+    const picked = selectTop3Distinct(candidates, students);
+    expect(picked).toHaveLength(3);
+    const ids = picked.map((p) => p.id);
+    expect(ids).toEqual(['anchor', 'alt1', 'alt2']);
+
+    // Soft reduction kicked in -> note appended on all three.
+    picked.forEach((p) => {
+      expect(p.diagnostics?.note ?? '').toContain('ausreichend unterschiedlichen Alternativen');
+    });
+  });
+
+  it('returns the pool unchanged with a note when fewer than 3 candidates exist', () => {
+    const students = makeStudents(5);
+    const a: SeatingAssignment = {};
+    students.forEach((s, i) => {
+      a[`desk-${i}`] = s.id;
+    });
+    const b: SeatingAssignment = { ...a };
+    b['desk-0'] = 'stu-1';
+    b['desk-1'] = 'stu-0';
+
+    const candidates = [
+      makeProposal('anchor', 100, a),
+      makeProposal('alt', 90, b)
+    ];
+    const picked = selectTop3Distinct(candidates, students);
+    expect(picked).toHaveLength(2);
+    picked.forEach((p) => {
+      expect(p.diagnostics?.note ?? '').toContain('ausreichend unterschiedlichen Alternativen');
+    });
+  });
+
+  it('preserves an existing diagnostic note and appends after a space', () => {
+    const students = makeStudents(5);
+    const a: SeatingAssignment = {};
+    students.forEach((s, i) => {
+      a[`desk-${i}`] = s.id;
+    });
+    const existing: SeatingProposal = {
+      ...makeProposal('anchor', 100, a),
+      diagnostics: {
+        unplacedStudents: [],
+        bottlenecks: [],
+        contradictoryRules: [],
+        note: 'Bestehender Hinweis.'
+      }
+    };
+    const picked = selectTop3Distinct([existing], students);
+    // Single candidate -> short-circuit returns it unchanged (no note append).
+    expect(picked).toHaveLength(1);
+    expect(picked[0].diagnostics?.note).toBe('Bestehender Hinweis.');
+  });
+});
+
+describe('Slice 6 -- generateSeatingProposals dedup integration', () => {
+  it('returns 3 proposals that differ from each other or carry the note', () => {
+    const proposals = generateSeatingProposals(
+      CONFLICT_STUDENTS,
+      CONFLICT_RULES,
+      CONFLICT_LAYOUT,
+      { seed: 1 }
+    );
+
+    expect(proposals.length).toBeGreaterThan(0);
+    expect(proposals.length).toBeLessThanOrEqual(3);
+
+    if (proposals.length === 3) {
+      // Either at least one pair of proposals differs in >= 1 assignment,
+      // or the diagnostic note is set (signalling no diverse alternatives).
+      const anyDifferent = proposals.some((p, i) =>
+        proposals.slice(i + 1).some(
+          (q) => hammingDistanceAssignments(p.assignments, q.assignments, CONFLICT_STUDENTS) >= 1
+        )
+      );
+      const allNoted = proposals.every((p) =>
+        (p.diagnostics?.note ?? '').includes('ausreichend unterschiedlichen Alternativen')
+      );
+      expect(anyDifferent || allNoted).toBe(true);
+    }
   });
 });

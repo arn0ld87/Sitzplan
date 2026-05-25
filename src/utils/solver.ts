@@ -993,8 +993,9 @@ export function generateSeatingPlan(
 
 /**
  * New solver entry point: runs `RANDOM_RESTARTS` independent greedy+SA
- * passes per preset and keeps the best score per preset. Slice 6 will use
- * the full restart pool for Top-3 dedup.
+ * passes per preset, collects ALL candidates (4 × 3 = 12) and runs
+ * Hamming-distance-aware dedup selection to pick the final 3 proposals
+ * (see Slice 6 in M2_PLAN.md).
  *
  * When `opts.seed` is provided every random choice routes through a
  * deterministic mulberry32 derived from it (see ADR 0005); two calls with
@@ -1015,22 +1016,123 @@ export function generateSeatingProposals(
 
   const masterRng: RNG = opts?.seed !== undefined ? mulberry32(opts.seed) : defaultRng();
 
-  return PRESETS.map((preset) => {
-    let best: { assignments: SeatingAssignment; score: number; violations: SeatingViolation[] } | null = null;
+  const allCandidates: SeatingProposal[] = [];
 
+  for (const preset of PRESETS) {
     for (let r = 0; r < RANDOM_RESTARTS; r++) {
       // Derive a fresh per-restart seed from the master rng so restarts
       // diverge but the whole run stays deterministic for a given seed.
       const restartSeed = Math.floor(masterRng() * 0xffffffff);
       const restartRng = mulberry32(restartSeed);
       const result = runHybridPass(students, rules, layout, preset, restartRng);
-      if (!best || result.score > best.score) {
-        best = result;
-      }
+      allCandidates.push(
+        buildProposal(preset, result.assignments, result.score, result.violations, students, rules, layout)
+      );
     }
+  }
 
-    // best is guaranteed non-null because RANDOM_RESTARTS >= 1.
-    const winner = best as { assignments: SeatingAssignment; score: number; violations: SeatingViolation[] };
-    return buildProposal(preset, winner.assignments, winner.score, winner.violations, students, rules, layout);
-  });
+  return selectTop3Distinct(allCandidates, students);
+}
+
+/**
+ * Hamming distance between two seating assignments, counted over students.
+ * For each student, a difference of 1 is added when their desk-id differs
+ * between `a` and `b`. A student assigned in one but not the other counts
+ * as 1 (different desk). Students missing from both count as 0.
+ */
+export function hammingDistanceAssignments(
+  a: SeatingAssignment,
+  b: SeatingAssignment,
+  students: Student[]
+): number {
+  // Build studentId -> deskId reverse maps for both assignments.
+  const deskA = new Map<string, string>();
+  const deskB = new Map<string, string>();
+  for (const [deskId, studentId] of Object.entries(a)) {
+    if (studentId) deskA.set(studentId, deskId);
+  }
+  for (const [deskId, studentId] of Object.entries(b)) {
+    if (studentId) deskB.set(studentId, deskId);
+  }
+
+  let diff = 0;
+  for (const student of students) {
+    const da = deskA.get(student.id);
+    const db = deskB.get(student.id);
+    if (da === undefined && db === undefined) continue;
+    if (da !== db) diff++;
+  }
+  return diff;
+}
+
+const DEDUP_PRIMARY_THRESHOLD = 0.30;
+const DEDUP_THRESHOLDS = [0.30, 0.25, 0.20, 0.15, 0.10, 0.05, 0.0] as const;
+const DEDUP_NOTE_SUFFIX =
+  'Hinweis: Solver konnte keine ausreichend unterschiedlichen Alternativen finden — weniger als 3 Vorschläge sind strukturell verschieden.';
+
+/**
+ * Pick up to 3 most-distinct top-scoring candidates by Hamming distance.
+ *
+ * Strategy: sort by score desc, pick the highest-scoring as anchor, then
+ * greedily add the next candidate whose Hamming distance to all already
+ * picked candidates is >= threshold * students.length. Start at 30%,
+ * soft-reduce in 5% steps down to 0% if fewer than 3 are found. If soft
+ * reduction had to kick in (or even at 0% the pool is too small to yield
+ * 3 distinct candidates), append a diagnostic note to each picked
+ * proposal so the UI can communicate the loss of diversity.
+ */
+export function selectTop3Distinct(
+  candidates: SeatingProposal[],
+  students: Student[]
+): SeatingProposal[] {
+  if (candidates.length === 0) return [];
+
+  const sorted = [...candidates].sort((a, b) => b.score - a.score);
+  if (sorted.length <= 1) return sorted;
+
+  let picked: SeatingProposal[] = [];
+  let usedThreshold = DEDUP_THRESHOLDS[DEDUP_THRESHOLDS.length - 1];
+
+  for (const threshold of DEDUP_THRESHOLDS) {
+    const minDistance = threshold * students.length;
+    picked = [sorted[0]];
+    for (let i = 1; i < sorted.length && picked.length < 3; i++) {
+      const cand = sorted[i];
+      const distinctFromAll = picked.every(
+        (p) => hammingDistanceAssignments(p.assignments, cand.assignments, students) >= minDistance
+      );
+      if (distinctFromAll) picked.push(cand);
+    }
+    if (picked.length >= 3) {
+      usedThreshold = threshold;
+      break;
+    }
+  }
+
+  // Append the diagnostic note when soft reduction had to lower the
+  // threshold below the primary value, or when even at t=0 the pool was
+  // too small to produce 3 candidates.
+  const softReduced = usedThreshold < DEDUP_PRIMARY_THRESHOLD || picked.length < 3;
+  if (softReduced) {
+    picked = picked.map((p) => ({
+      ...p,
+      diagnostics: appendDiagnosticNote(p.diagnostics, DEDUP_NOTE_SUFFIX)
+    }));
+  }
+
+  return picked;
+}
+
+function appendDiagnosticNote(
+  diagnostics: SolverDiagnostics | undefined,
+  suffix: string
+): SolverDiagnostics {
+  const base: SolverDiagnostics = diagnostics ?? {
+    unplacedStudents: [],
+    bottlenecks: [],
+    contradictoryRules: []
+  };
+  const existingNote = base.note?.trim();
+  const note = existingNote ? `${existingNote} ${suffix}` : suffix;
+  return { ...base, note };
 }

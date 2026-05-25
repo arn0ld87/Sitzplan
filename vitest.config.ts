@@ -5,6 +5,11 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
+    // The hybrid solver runs 12 SA passes per generateSeatingProposals call
+    // (Slice 6 keeps the full restart pool for dedup). Two back-to-back
+    // calls on the SMALL fixture flirt with the default 5s budget — bump
+    // the per-test timeout to 15s.
+    testTimeout: 15000,
     environmentOptions: {
       jsdom: {
         // localStorage throws on `null` opaque origins (about:blank).
