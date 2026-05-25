@@ -87,20 +87,32 @@ Abnahme:
 
 Ziel: Raumlayouts werden komfortabler und weniger fehleranfällig.
 
+Status: **alle 5 Slices fertig** (Branch `feat/milestone-3`, Stand 2026-05-25).
+
 Pflichtaufgaben:
 
-- Mindestanzahl Sitzplätze sichtbar machen
-- Warnung bei mehr Schüler:innen als Plätzen
-- Elementkollisionen erkennen oder anzeigen
-- Undo/Redo vorbereiten oder umsetzen
-- Tastaturbedienung für zentrale Aktionen verbessern
-- leere Zustände verbessern
+- Mindestanzahl Sitzplätze sichtbar machen — erfüllt (Slice 1, Stats-Bar zeigt Plätze + Schüler:innen)
+- Warnung bei mehr Schüler:innen als Plätzen — erfüllt (Slice 1, Warn-Banner mit konkretem Defizit)
+- Elementkollisionen erkennen oder anzeigen — erfüllt (Slice 2, `findOverlappingIds` + rote Strich-Kontur + Kollisions-Chip)
+- Undo/Redo vorbereiten oder umsetzen — erfüllt (Slice 3, `useHistoryState` + Toolbar-Buttons)
+- Tastaturbedienung für zentrale Aktionen verbessern — erfüllt (Slice 4, Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z, Pfeile, Del, Esc, R)
+- leere Zustände verbessern — erfüllt (Slice 5, wiederverwendbare `<EmptyState>`-Komponente)
+
+Slice-Tracking (Branch `feat/milestone-3`):
+
+| Slice | Inhalt | Commit |
+|-------|--------|--------|
+| 1 | Kapazitätsanzeige + Über­belegungs-Warnung | `3956d53` |
+| 2 | Kollisions-Detection extrahiert, visuell markiert | `d4b3bbf` |
+| 3 | Undo/Redo Stack via `useHistoryState` | `7965188` |
+| 4 | Tastatur-Shortcuts (Undo, Redo, Move, Delete, Rotate) | `8a21b03` |
+| 5 | Reusable `EmptyState` in Raumeditor + Schülerliste | `7b13800` |
 
 Abnahme:
 
-- Raumeditor ist ohne Vorwissen nutzbar
-- keine stillen kaputten Layouts
-- Druckansicht bleibt intakt
+- Raumeditor ist ohne Vorwissen nutzbar — erfüllt (EmptyState-Hinweis + CTA bei leerem Raum, sichtbare Stats-Bar, sichtbare Buttons)
+- keine stillen kaputten Layouts — erfüllt (Kollisionen sind rot markiert und im Stats-Chip gezählt, Über­belegung als Banner)
+- Druckansicht bleibt intakt — erfüllt (Print-CSS unverändert, Empty-State-/Warning-Markup hängt am Editor-Card und ist nicht im Generator-Print-Pfad)
 
 ## Milestone 4 – Produktreife lokale Version
 

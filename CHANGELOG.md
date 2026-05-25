@@ -4,9 +4,40 @@ Alle nennenswerten Änderungen am Sitzplaner werden hier dokumentiert.
 
 Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/) und [Semantic Versioning](https://semver.org/lang/de/).
 
-## [Unreleased] – Milestone 2: Solver-Qualität & Konfliktanalyse
+## [Unreleased] – Milestone 3: Raumeditor & Bedienbarkeit
 
-Branch: `feat/milestone-2`. Stand: 2026-05-25 — alle 7 Slices + 3 ADRs gemerged, Performance-Budget < 2 s @ 35/30 als Vitest-Test verankert, bereit für PR.
+Branch: `feat/milestone-3`. Stand: 2026-05-25 — alle 5 Slices gemerged, 134 Tests grün, bereit für PR.
+
+### Hinzugefügt
+
+- **Kapazitätsanzeige** im Raumeditor: Stats-Bar mit Sitzplatz-Count und Schüler-Count, plus Warn-Banner mit konkretem Defizit, wenn mehr Schüler:innen als Plätze vorhanden sind (`src/utils/layoutCapacity.ts` mit `countDesks`/`isOverCapacity`).
+- **Kollisions-Detection** als wiederverwendbare Utility (`src/utils/layoutCollision.ts` mit `wouldOverlap`/`findOverlappingIds`). Überlappende Elemente werden mit roter gestrichelter Stroke + sanftem Puls markiert; in der Stats-Bar erscheint ein „X Kollisionen"-Chip.
+- **Undo/Redo** über generischen `useHistoryState`-Hook (`src/hooks/useHistoryState.ts`) — past/present/future-Stack mit konfigurierbarem Limit (default 50). App.tsx leitet alle Layout-Mutationen durch die History; Toolbar im Raumeditor zeigt Undo/Redo-Buttons mit Disabled-State.
+- **Tastatur-Shortcuts** im Raumeditor (`src/utils/editorKeymap.ts`): Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z bzw. Ctrl+Y, Pfeiltasten zum Verschieben, Delete/Backspace zum Löschen, Esc zum Deselektieren, R zum Rotieren. Hört auf `document`-Level, überspringt Inputs/Textareas/Selects/contenteditable.
+- **Reusable `<EmptyState>`-Komponente** (`src/components/EmptyState.tsx`) mit Icon, Titel, optionaler Beschreibung und optionalem CTA. Eingesetzt im Raumeditor (leerer Raum → CTA „Standard-Layout laden") und in der Schülerliste (leere Klasse).
+- **Tests** für alle neuen Utilities + Hook + Komponente: 5 (capacity), 8 (collision), 9 (useHistoryState), 14 (keymap), 5 (EmptyState) — gesamt 134 Tests in 12 Files.
+
+### Geändert
+
+- Inline `checkOverlap` im `RoomEditor` ersetzt durch Import aus `utils/layoutCollision` — kein doppelter Code mehr.
+- Default-Theme jetzt `light` (vorher `dark`); gespeicherte User-Präferenz hat weiterhin Vorrang.
+- App-Layout durch `useHistoryState` gekapselt; `setLayout`-Aufrufer (Mock-Load, Import) bleiben unverändert und sind dadurch automatisch undoable.
+
+### Behoben
+
+- `.dgrep/`, `Sitzplan.zip` und das Top-Level `logo.png` (Duplikat von `public/logo.png`) waren versehentlich in den Index gerutscht — entfernt und in `.gitignore` aufgenommen.
+
+### Bekannte offene Punkte (out of scope für M3, → M4+)
+
+- Drag-Preview mit Live-Kollisions-Feedback (heute snappt das Element zurück, ohne visuellen Hinweis während des Drags).
+- Mehrere Layouts pro Klasse (M4).
+- CSV-Import für Schülerlisten (M4).
+
+---
+
+## [Released] – Milestone 2: Solver-Qualität & Konfliktanalyse
+
+Branch: `feat/milestone-2` (gemergt nach `main` als PR #14, Merge-Commit `8d7f728`). Alle 7 Slices + 3 ADRs in Produktion, Performance-Budget < 2 s @ 35/30 als Vitest-Test verankert.
 
 ### Hinzugefügt
 
